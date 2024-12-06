@@ -1,0 +1,37 @@
+# rustfmt.toml
+
+# Maximum width of each line. Keeping lines under 100 characters ensures readability.
+max_width = 100
+
+# Controls the maximum width of documentation comments and makes rustfmt wrap them to fit.
+format_code_in_doc_comments = true
+wrap_comments = true
+normalize_doc_attributes = true
+
+# If a function's arguments span multiple lines, force them to be aligned vertically.
+fn_call_width = 60
+
+# Controls the formatting of imports by merging groups from the same crate.
+merge_imports = true
+
+# Adds a trailing comma to multi-line function arguments and array elements, which helps with cleaner diffs.
+trailing_comma = "Always"
+
+# Force function and type parameters to be on separate lines when the combined length exceeds max_width.
+newline_style = "Auto"
+
+# Controls the indentation for chain method calls (e.g., when using builder pattern).
+chain_indent = "Block"
+
+# Control where clauses placement. This improves readability in functions with complex generic bounds.
+where_density = "Vertical"
+
+# The format for where clauses; setting vertical aligns items vertically when there are multiple clauses.
+where_trailing_comma = true
+
+# Struct and enum formatting options to enhance readability by keeping them multi-line if they exceed max_width.
+struct_lit_multiline_style = "PreferSingle"
+enum_variant_align_threshold = 20
+
+# Format match arms to be more readable by enforcing them to have a similar layout.
+match_block_trailing_comma = true
