@@ -45,10 +45,10 @@
 //! ### Generating a Keypair
 //!
 //! ```rust
-//! use dgsp::sphincs_plus::{SphincsPlus, SphincsPlusType};
+//! use dgsp::sphincs_plus::SphincsPlus;
 //!
 //! // Instantiate a SPHINCS+ wrapper for SHAKE-128 with fast optimization.
-//! let sphincs = SphincsPlus::new(SphincsPlusType::SPHINCSSHAKE128F);
+//! let sphincs = SphincsPlus::default();
 //!
 //! // Generate a keypair (public and secret keys).
 //! let (public_key, secret_key) = sphincs.keygen().expect("Key generation failed");
@@ -58,9 +58,9 @@
 //! ### Signing a Message
 //!
 //! ```rust
-//! use dgsp::sphincs_plus::{SphincsPlus, SphincsPlusType, SphincsPlusData};
+//! use dgsp::sphincs_plus::SphincsPlus;
 //!
-//! let sphincs = SphincsPlus::new(SphincsPlusType::SPHINCSSHAKE128F);
+//! let sphincs = SphincsPlus::default();
 //! let (_, secret_key) = sphincs.keygen().expect("Key generation failed");
 //!
 //! let message = b"DGSP post-quantum group signature message";
@@ -71,9 +71,9 @@
 //! ### Verifying a Signature
 //!
 //! ```rust
-//! use dgsp::sphincs_plus::{SphincsPlus, SphincsPlusType, SphincsPlusData};
+//! use dgsp::sphincs_plus::SphincsPlus;
 //!
-//! let sphincs = SphincsPlus::new(SphincsPlusType::SPHINCSSHAKE128F);
+//! let sphincs = SphincsPlus::default();
 //! let (public_key, secret_key) = sphincs.keygen().expect("Key generation failed");
 //!
 //! let message = b"DGSP post-quantum group signature message";
@@ -146,305 +146,246 @@
 //! building complex cryptographic protocols, such as post-quantum group signature schemes.
 
 use crate::errors::SphincsError;
-use pqcrypto_sphincsplus::ffi::*;
-use pqcrypto_sphincsplus::*;
 use pqcrypto_traits::sign::{DetachedSignature, PublicKey, SecretKey};
 use zeroize::Zeroize;
 
-/// The available hash functions provided by [PQClean](https://github.com/PQClean/PQClean/) project
-/// for SPHINCS+.
-/// Represents the available hash function variants for the SPHINCS+ signature scheme, as provided by
-/// the [PQClean](https://github.com/PQClean/PQClean/) project.
-///
-/// # Overview
-///
-/// `SphincsType` enumerates the supported SPHINCS+ parameter sets, including different hash functions
-/// and security levels such as `SHAKE` and `SHA2`. Each variant corresponds to a specific configuration
-/// of the SPHINCS+ scheme with either `fast` (f) or `small` (s) optimizations, and different hash functions.
-///
-/// # Variants
-///
-/// - `SPHINCSSHAKE128F`, `SPHINCSSHAKE128S`: Uses the SHAKE-128 hash function with either `fast` or `small` settings.
-/// - `SPHINCSSHAKE192F`, `SPHINCSSHAKE192S`: Uses the SHAKE-192 hash function with either `fast` or `small` settings.
-/// - `SPHINCSSHAKE256F`, `SPHINCSSHAKE256S`: Uses the SHAKE-256 hash function with either `fast` or `small` settings.
-/// - `SPHINCSSHA2128F`, `SPHINCSSHA2128S`: Uses the SHA-256 hash function at 128-bit security level with either `fast` or `small` settings.
-/// - `SPHINCSSHA2192F`, `SPHINCSSHA2192S`: Uses the SHA-256 hash function at 192-bit security level with either `fast` or `small` settings.
-/// - `SPHINCSSHA2256F`, `SPHINCSSHA2256S`: Uses the SHA-256 hash function at 256-bit security level with either `fast` or `small` settings.
-///
-/// The `F` (fast) and `S` (small) suffixes indicate whether the parameter set optimizes for speed
-/// (`F` - fast) or memory efficiency (`S` - small).
-///
-/// # Methods
-///
-/// `SphincsType` provides methods to retrieve parameters related to each variant of the SPHINCS+ scheme, such as:
-///
-/// - **`crypto_publickey_bytes()`**: Returns the size of the public key in bytes.
-/// - **`crypto_secretkey_bytes()`**: Returns the size of the secret key in bytes.
-/// - **`crypto_bytes()`**: Returns the size of the signature in bytes.
-///
-/// # References
-///
-/// For more information about SPHINCS+, refer to:
-/// - [PQClean GitHub Repository](https://github.com/PQClean/PQClean/)
-/// - [SPHINCS+ Specification](https://sphincs.org/)
-#[derive(Copy, Clone, Debug)]
-#[repr(usize)]
-pub enum SphincsPlusType {
-    /// sphincs-shake-128f-simple - clean/avx2(if supported)
-    SPHINCSSHAKE128F,
-    /// sphincs-shake-128s-simple - clean/avx2(if supported)
-    SPHINCSSHAKE128S,
-    /// sphincs-shake-192f-simple - clean/avx2(if supported)
-    SPHINCSSHAKE192F,
-    /// sphincs-shake-192s-simple - clean/avx2(if supported)
-    SPHINCSSHAKE192S,
-    /// sphincs-shake-256f-simple - clean/avx2(if supported)
-    SPHINCSSHAKE256F,
-    /// sphincs-shake-256s-simple - clean/avx2(if supported)
-    SPHINCSSHAKE256S,
-    /// sphincs-sha2-128f-simple - clean/avx2(if supported)
-    SPHINCSSHA2128F,
-    /// sphincs-sha2-128s-simple - clean/avx2(if supported)
-    SPHINCSSHA2128S,
-    /// sphincs-sha2-192f-simple - clean/avx2(if supported)
-    SPHINCSSHA2192F,
-    /// sphincs-sha2-192s-simple - clean/avx2(if supported)
-    SPHINCSSHA2192S,
-    /// sphincs-sha2-256f-simple - clean/avx2(if supported)
-    SPHINCSSHA2256F,
-    /// sphincs-sha2-256s-simple - clean/avx2(if supported)
-    SPHINCSSHA2256S,
-}
+#[cfg(feature = "serialization")]
+use serde::{Deserialize, Serialize};
+#[cfg(feature = "serialization")]
+use serde_big_array::BigArray;
 
-impl SphincsPlusType {
-    pub fn crypto_publickey_bytes(&self) -> usize {
-        const PUBLICKEY_BYTES: [usize; 12] = [
-            PQCLEAN_SPHINCSSHAKE128FSIMPLE_CLEAN_CRYPTO_PUBLICKEYBYTES,
-            PQCLEAN_SPHINCSSHAKE128SSIMPLE_CLEAN_CRYPTO_PUBLICKEYBYTES,
-            PQCLEAN_SPHINCSSHAKE192FSIMPLE_CLEAN_CRYPTO_PUBLICKEYBYTES,
-            PQCLEAN_SPHINCSSHAKE192SSIMPLE_CLEAN_CRYPTO_PUBLICKEYBYTES,
-            PQCLEAN_SPHINCSSHAKE256FSIMPLE_CLEAN_CRYPTO_PUBLICKEYBYTES,
-            PQCLEAN_SPHINCSSHAKE256SSIMPLE_CLEAN_CRYPTO_PUBLICKEYBYTES,
-            PQCLEAN_SPHINCSSHA2128FSIMPLE_CLEAN_CRYPTO_PUBLICKEYBYTES,
-            PQCLEAN_SPHINCSSHA2128SSIMPLE_CLEAN_CRYPTO_PUBLICKEYBYTES,
-            PQCLEAN_SPHINCSSHA2192FSIMPLE_CLEAN_CRYPTO_PUBLICKEYBYTES,
-            PQCLEAN_SPHINCSSHA2192SSIMPLE_CLEAN_CRYPTO_PUBLICKEYBYTES,
-            PQCLEAN_SPHINCSSHA2256FSIMPLE_CLEAN_CRYPTO_PUBLICKEYBYTES,
-            PQCLEAN_SPHINCSSHA2256SSIMPLE_CLEAN_CRYPTO_PUBLICKEYBYTES,
-        ];
-        PUBLICKEY_BYTES[*self as usize]
-    }
+#[cfg(feature = "sphincs_sha2_128f")]
+use crate::sphincs_plus::params_sphincs_sha2_128f::*;
+#[cfg(feature = "sphincs_sha2_128s")]
+use crate::sphincs_plus::params_sphincs_sha2_128s::*;
+#[cfg(feature = "sphincs_sha2_192f")]
+use crate::sphincs_plus::params_sphincs_sha2_192f::*;
+#[cfg(feature = "sphincs_sha2_192s")]
+use crate::sphincs_plus::params_sphincs_sha2_192s::*;
+#[cfg(feature = "sphincs_sha2_256f")]
+use crate::sphincs_plus::params_sphincs_sha2_256f::*;
+#[cfg(feature = "sphincs_sha2_256s")]
+use crate::sphincs_plus::params_sphincs_sha2_256s::*;
+#[cfg(feature = "sphincs_shake_128f")]
+use crate::sphincs_plus::params_sphincs_shake_128f::*;
+#[cfg(feature = "sphincs_shake_128s")]
+use crate::sphincs_plus::params_sphincs_shake_128s::*;
+#[cfg(feature = "sphincs_shake_192f")]
+use crate::sphincs_plus::params_sphincs_shake_192f::*;
+#[cfg(feature = "sphincs_shake_192s")]
+use crate::sphincs_plus::params_sphincs_shake_192s::*;
+#[cfg(feature = "sphincs_shake_256f")]
+use crate::sphincs_plus::params_sphincs_shake_256f::*;
+#[cfg(feature = "sphincs_shake_256s")]
+use crate::sphincs_plus::params_sphincs_shake_256s::*;
 
-    pub fn crypto_secretkey_bytes(&self) -> usize {
-        const SECRETKEY_BYTES: [usize; 12] = [
-            PQCLEAN_SPHINCSSHAKE128FSIMPLE_CLEAN_CRYPTO_SECRETKEYBYTES,
-            PQCLEAN_SPHINCSSHAKE128SSIMPLE_CLEAN_CRYPTO_SECRETKEYBYTES,
-            PQCLEAN_SPHINCSSHAKE192FSIMPLE_CLEAN_CRYPTO_SECRETKEYBYTES,
-            PQCLEAN_SPHINCSSHAKE192SSIMPLE_CLEAN_CRYPTO_SECRETKEYBYTES,
-            PQCLEAN_SPHINCSSHAKE256FSIMPLE_CLEAN_CRYPTO_SECRETKEYBYTES,
-            PQCLEAN_SPHINCSSHAKE256SSIMPLE_CLEAN_CRYPTO_SECRETKEYBYTES,
-            PQCLEAN_SPHINCSSHA2128FSIMPLE_CLEAN_CRYPTO_SECRETKEYBYTES,
-            PQCLEAN_SPHINCSSHA2128SSIMPLE_CLEAN_CRYPTO_SECRETKEYBYTES,
-            PQCLEAN_SPHINCSSHA2192FSIMPLE_CLEAN_CRYPTO_SECRETKEYBYTES,
-            PQCLEAN_SPHINCSSHA2192SSIMPLE_CLEAN_CRYPTO_SECRETKEYBYTES,
-            PQCLEAN_SPHINCSSHA2256FSIMPLE_CLEAN_CRYPTO_SECRETKEYBYTES,
-            PQCLEAN_SPHINCSSHA2256SSIMPLE_CLEAN_CRYPTO_SECRETKEYBYTES,
-        ];
-        SECRETKEY_BYTES[*self as usize]
-    }
+#[cfg(feature = "sphincs_sha2_128f")]
+use pqcrypto_sphincsplus::sphincssha2128fsimple::*;
+#[cfg(feature = "sphincs_sha2_128s")]
+use pqcrypto_sphincsplus::sphincssha2128ssimple::*;
+#[cfg(feature = "sphincs_sha2_192f")]
+use pqcrypto_sphincsplus::sphincssha2192fsimple::*;
+#[cfg(feature = "sphincs_sha2_192s")]
+use pqcrypto_sphincsplus::sphincssha2192ssimple::*;
+#[cfg(feature = "sphincs_sha2_256f")]
+use pqcrypto_sphincsplus::sphincssha2256fsimple::*;
+#[cfg(feature = "sphincs_sha2_256s")]
+use pqcrypto_sphincsplus::sphincssha2256ssimple::*;
+#[cfg(feature = "sphincs_shake_128f")]
+use pqcrypto_sphincsplus::sphincsshake128fsimple::*;
+#[cfg(feature = "sphincs_shake_128s")]
+use pqcrypto_sphincsplus::sphincsshake128ssimple::*;
+#[cfg(feature = "sphincs_shake_192f")]
+use pqcrypto_sphincsplus::sphincsshake192fsimple::*;
+#[cfg(feature = "sphincs_shake_192s")]
+use pqcrypto_sphincsplus::sphincsshake192ssimple::*;
+#[cfg(feature = "sphincs_shake_256f")]
+use pqcrypto_sphincsplus::sphincsshake256fsimple::*;
+#[cfg(feature = "sphincs_shake_256s")]
+use pqcrypto_sphincsplus::sphincsshake256ssimple::*;
 
-    pub fn crypto_bytes(&self) -> usize {
-        const CRYPTO_BYTES: [usize; 12] = [
-            PQCLEAN_SPHINCSSHAKE128FSIMPLE_CLEAN_CRYPTO_BYTES,
-            PQCLEAN_SPHINCSSHAKE128SSIMPLE_CLEAN_CRYPTO_BYTES,
-            PQCLEAN_SPHINCSSHAKE192FSIMPLE_CLEAN_CRYPTO_BYTES,
-            PQCLEAN_SPHINCSSHAKE192SSIMPLE_CLEAN_CRYPTO_BYTES,
-            PQCLEAN_SPHINCSSHAKE256FSIMPLE_CLEAN_CRYPTO_BYTES,
-            PQCLEAN_SPHINCSSHAKE256SSIMPLE_CLEAN_CRYPTO_BYTES,
-            PQCLEAN_SPHINCSSHA2128FSIMPLE_CLEAN_CRYPTO_BYTES,
-            PQCLEAN_SPHINCSSHA2128SSIMPLE_CLEAN_CRYPTO_BYTES,
-            PQCLEAN_SPHINCSSHA2192FSIMPLE_CLEAN_CRYPTO_BYTES,
-            PQCLEAN_SPHINCSSHA2192SSIMPLE_CLEAN_CRYPTO_BYTES,
-            PQCLEAN_SPHINCSSHA2256FSIMPLE_CLEAN_CRYPTO_BYTES,
-            PQCLEAN_SPHINCSSHA2256SSIMPLE_CLEAN_CRYPTO_BYTES,
-        ];
-        CRYPTO_BYTES[*self as usize]
-    }
-}
+#[cfg(feature = "sphincs_sha2_128f")]
+pub mod params_sphincs_sha2_128f;
+#[cfg(feature = "sphincs_sha2_128s")]
+pub mod params_sphincs_sha2_128s;
+#[cfg(feature = "sphincs_sha2_192f")]
+pub mod params_sphincs_sha2_192f;
+#[cfg(feature = "sphincs_sha2_192s")]
+pub mod params_sphincs_sha2_192s;
+#[cfg(feature = "sphincs_sha2_256f")]
+pub mod params_sphincs_sha2_256f;
+#[cfg(feature = "sphincs_sha2_256s")]
+pub mod params_sphincs_sha2_256s;
+#[cfg(feature = "sphincs_shake_128f")]
+pub mod params_sphincs_shake_128f;
+#[cfg(feature = "sphincs_shake_128s")]
+pub mod params_sphincs_shake_128s;
+#[cfg(feature = "sphincs_shake_192f")]
+pub mod params_sphincs_shake_192f;
+#[cfg(feature = "sphincs_shake_192s")]
+pub mod params_sphincs_shake_192s;
+#[cfg(feature = "sphincs_shake_256f")]
+pub mod params_sphincs_shake_256f;
+#[cfg(feature = "sphincs_shake_256s")]
+pub mod params_sphincs_shake_256s;
 
+#[cfg(any(
+    feature = "sphincs_sha2_128f",
+    feature = "sphincs_sha2_128s",
+    feature = "sphincs_sha2_192f",
+    feature = "sphincs_sha2_192s",
+    feature = "sphincs_sha2_256f",
+    feature = "sphincs_sha2_256s",
+))]
+pub mod sha2_offsets;
+#[cfg(any(
+    feature = "sphincs_shake_128f",
+    feature = "sphincs_shake_128s",
+    feature = "sphincs_shake_192f",
+    feature = "sphincs_shake_192s",
+    feature = "sphincs_shake_256f",
+    feature = "sphincs_shake_256s",
+))]
+pub mod shake_offsets;
+
+const CRYPTO_PUBLICKEYBYTES: usize = SPX_PK_BYTES;
+const CRYPTO_SECRETKEYBYTES: usize = SPX_SK_BYTES;
+const CRYPTO_BYTES: usize = SPX_BYTES;
+// const CRYPTO_SEEDBYTES: usize = 3 * SPX_N;
+
+// #[derive(Copy, Clone, Default, Debug)]
+// pub struct SphincsContext {
+//     pub pub_seed: [u8; SPX_N],
+//     pub sk_seed: [u8; SPX_N],
+// }
+
+/// `SphincsPlusPublicKey` securely holds public-key for the SPHINCS+ signature scheme, using a
+/// `u8; CRYPTO_PUBLICKEYBYTES` internal field.
+/// This struct implements `Zeroize`, ensuring the data is wiped from memory when dropped (`#[zeroize(drop)]`).
+// Cloning is supported but should be done cautiously, as it duplicates sensitive information in memory.
 #[derive(Clone, Debug, Zeroize)]
 #[zeroize(drop)]
-/// `SphincsData` securely holds sensitive cryptographic data for the SPHINCS+ signature scheme, using a `Vec<u8>`.
-/// This struct implements `Zeroize`, ensuring the data is wiped from memory when dropped (`#[zeroize(drop)]`).
-/// Cloning is supported but should be done cautiously, as it duplicates sensitive information in memory.
-pub struct SphincsPlusData(Vec<u8>);
+#[cfg_attr(feature = "serialization", derive(Serialize, Deserialize))]
+pub struct SphincsPlusPublicKey(
+    #[cfg_attr(feature = "serialization", serde(with = "BigArray"))] [u8; CRYPTO_PUBLICKEYBYTES],
+);
 
-impl AsRef<[u8]> for SphincsPlusData {
+impl AsRef<[u8]> for SphincsPlusPublicKey {
     fn as_ref(&self) -> &[u8] {
         &self.0
     }
 }
 
-/// Sphincs is a wrapper around the SPHINCS+ post-quantum signature scheme, providing an easy-to-use
-/// API for generating keypairs, signing messages, and verifying signatures. It supports multiple
-/// variants of the SPHINCS+ scheme, which offer different trade-offs between security, speed, and
-/// signature size.
-pub struct SphincsPlus {
-    /// sphincs-plus type
-    pub sphincs_plus_type: SphincsPlusType,
-    /// Public-key bytes
-    crypto_publickey_bytes: usize,
-    /// Secret-key bytes
-    crypto_secretkey_bytes: usize,
-    /// Signature bytes
-    crypto_bytes: usize,
+impl TryFrom<&[u8]> for SphincsPlusPublicKey {
+    type Error = SphincsError;
+    fn try_from(data: &[u8]) -> Result<SphincsPlusPublicKey, SphincsError> {
+        if data.len() != CRYPTO_PUBLICKEYBYTES {
+            Err(SphincsError::BadLength(CRYPTO_PUBLICKEYBYTES, data.len()))
+        } else {
+            let mut array = [0u8; CRYPTO_PUBLICKEYBYTES];
+            array.copy_from_slice(data);
+            Ok(SphincsPlusPublicKey(array))
+        }
+    }
 }
 
-macro_rules! gen_sphincs_keypair {
-    ($variant:ident) => {{
-        let (pk, sk) = $variant::keypair();
-        (pk.as_bytes().to_vec(), sk.as_bytes().to_vec())
-    }};
+/// `SphincsPlusSecretKey` securely holds public-key for the SPHINCS+ signature scheme, using a
+/// `u8; CRYPTO_SECRETKEYBYTES` internal field.
+/// This struct implements `Zeroize`, ensuring the data is wiped from memory when dropped (`#[zeroize(drop)]`).
+#[derive(Clone, Debug, Zeroize)]
+#[zeroize(drop)]
+#[cfg_attr(feature = "serialization", derive(Serialize, Deserialize))]
+pub struct SphincsPlusSecretKey(
+    #[cfg_attr(feature = "serialization", serde(with = "BigArray"))] [u8; CRYPTO_SECRETKEYBYTES],
+);
+
+impl AsRef<[u8]> for SphincsPlusSecretKey {
+    fn as_ref(&self) -> &[u8] {
+        &self.0
+    }
 }
 
-macro_rules! gen_sphincs_verify_detached_signature {
-    ($variant:ident, $sig:ident, $msg:ident, $pk:ident) => {{
-        Ok($variant::verify_detached_signature(
-            &$variant::DetachedSignature::from_bytes($sig)?,
-            $msg,
-            &$variant::PublicKey::from_bytes($pk)?,
-        )?)
-    }};
+impl TryFrom<&[u8]> for SphincsPlusSecretKey {
+    type Error = SphincsError;
+    fn try_from(data: &[u8]) -> Result<SphincsPlusSecretKey, SphincsError> {
+        if data.len() != CRYPTO_SECRETKEYBYTES {
+            Err(SphincsError::BadLength(CRYPTO_SECRETKEYBYTES, data.len()))
+        } else {
+            let mut array = [0u8; CRYPTO_SECRETKEYBYTES];
+            array.copy_from_slice(data);
+            Ok(SphincsPlusSecretKey(array))
+        }
+    }
 }
 
-macro_rules! gen_sphincs_detached_sign {
-    ($variant:ident, $msg:ident, $sk:ident) => {{
-        Ok(
-            $variant::detached_sign($msg, &$variant::SecretKey::from_bytes($sk.as_ref())?)
-                .as_bytes()
-                .to_vec(),
-        )
-    }};
+/// `SphincsPlusSignature` securely holds public-key for the SPHINCS+ signature scheme, using a
+/// `u8; CRYPTO_BYTES` internal field.
+/// This struct implements `Zeroize`, ensuring the data is wiped from memory when dropped (`#[zeroize(drop)]`).
+#[derive(Clone, Debug, Zeroize)]
+#[zeroize(drop)]
+#[cfg_attr(feature = "serialization", derive(Serialize, Deserialize))]
+pub struct SphincsPlusSignature(
+    #[cfg_attr(feature = "serialization", serde(with = "BigArray"))] [u8; CRYPTO_BYTES],
+);
+
+impl AsRef<[u8]> for SphincsPlusSignature {
+    fn as_ref(&self) -> &[u8] {
+        &self.0
+    }
+}
+
+impl TryFrom<&[u8]> for SphincsPlusSignature {
+    type Error = SphincsError;
+    fn try_from(data: &[u8]) -> Result<SphincsPlusSignature, SphincsError> {
+        if data.len() != CRYPTO_BYTES {
+            Err(SphincsError::BadLength(CRYPTO_BYTES, data.len()))
+        } else {
+            let mut array = [0u8; CRYPTO_BYTES];
+            array.copy_from_slice(data);
+            Ok(SphincsPlusSignature(array))
+        }
+    }
+}
+
+/// `SphincsPlus` is a wrapper around the SPHINCS+ post-quantum signature scheme, providing an
+/// easy-to-use API for generating keypairs, signing messages, and verifying signatures. It supports
+/// multiple variants of the SPHINCS+ scheme, which offer different trade-offs between security,
+/// speed, and signature size.
+pub struct SphincsPlus;
+
+impl Default for SphincsPlus {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl SphincsPlus {
-    /// Creates `Sphincs` instance based on the given `SphincsType`.
+    /// Creates `SphincsPlus` instance based on the active SPHINCS+ feature.
     /// It also sets the length of the public-key, secret-key, and signature byte sizes based on the
-    /// given `SphincsType`.
-    pub fn new(sphincs_type: SphincsPlusType) -> Self {
-        SphincsPlus {
-            crypto_publickey_bytes: sphincs_type.crypto_publickey_bytes(),
-            crypto_secretkey_bytes: sphincs_type.crypto_secretkey_bytes(),
-            crypto_bytes: sphincs_type.crypto_bytes(),
-            sphincs_plus_type: sphincs_type,
-        }
+    /// given SPHINCS+ type.
+    pub fn new() -> Self {
+        SphincsPlus
     }
 
-    /// Generate (pk, sk) keypair of SPHINCS+ for an instance of `Sphincs`.
-    ///
-    /// It returns `Err(SphincsError)` if the secret-key length is not appropriate.
-    /// Otherwise, the signature is return wrapped in `Ok(SphincsData)`.
-    pub fn keygen(&self) -> Result<(SphincsPlusData, SphincsPlusData), SphincsError> {
-        let (pk, sk) = self.sphincs_keypair();
-        if self.crypto_publickey_bytes != pk.len() {
-            return Err(SphincsError::BadLength(
-                self.crypto_publickey_bytes,
-                pk.len(),
-            ));
-        }
-        if self.crypto_secretkey_bytes != sk.len() {
-            return Err(SphincsError::BadLength(
-                self.crypto_secretkey_bytes,
-                sk.len(),
-            ));
-        }
-        Ok((SphincsPlusData(pk), SphincsPlusData(sk)))
+    /// Generate (pk, sk) keypair of SPHINCS+ for an instance of `SphincsPlus`.
+    pub fn keygen(&self) -> Result<(SphincsPlusPublicKey, SphincsPlusSecretKey), SphincsError> {
+        let (pk, sk) = keypair();
+        Ok((pk.as_bytes().try_into()?, sk.as_bytes().try_into()?))
     }
 
-    fn sphincs_keypair(&self) -> (Vec<u8>, Vec<u8>) {
-        match self.sphincs_plus_type {
-            SphincsPlusType::SPHINCSSHAKE128F => gen_sphincs_keypair!(sphincsshake128fsimple),
-            SphincsPlusType::SPHINCSSHAKE128S => gen_sphincs_keypair!(sphincsshake128ssimple),
-            SphincsPlusType::SPHINCSSHAKE192F => gen_sphincs_keypair!(sphincsshake192fsimple),
-            SphincsPlusType::SPHINCSSHAKE192S => gen_sphincs_keypair!(sphincsshake192ssimple),
-            SphincsPlusType::SPHINCSSHAKE256F => gen_sphincs_keypair!(sphincsshake256fsimple),
-            SphincsPlusType::SPHINCSSHAKE256S => gen_sphincs_keypair!(sphincsshake256ssimple),
-            SphincsPlusType::SPHINCSSHA2128F => gen_sphincs_keypair!(sphincssha2128fsimple),
-            SphincsPlusType::SPHINCSSHA2128S => gen_sphincs_keypair!(sphincssha2128ssimple),
-            SphincsPlusType::SPHINCSSHA2192F => gen_sphincs_keypair!(sphincssha2192fsimple),
-            SphincsPlusType::SPHINCSSHA2192S => gen_sphincs_keypair!(sphincssha2192ssimple),
-            SphincsPlusType::SPHINCSSHA2256F => gen_sphincs_keypair!(sphincssha2256fsimple),
-            SphincsPlusType::SPHINCSSHA2256S => gen_sphincs_keypair!(sphincssha2256ssimple),
-        }
-    }
-
-    /// Calculate the SPHINCS+ signature for a given `Sphincs` instance, based on the given message
-    /// and secret-key.
-    ///
-    /// It returns `Err(SphincsError)` if the secret-key length is not appropriate. Otherwise, the
-    /// signature is return wrapped in `Ok(SphincsData)` without including the original message in
-    /// its output.
+    /// Calculate the SPHINCS+ signature for a given `SphincsPlus` instance, based on the given
+    /// message and secret-key.
     pub fn sign(
         &self,
         message: &[u8],
-        sk: &SphincsPlusData,
-    ) -> Result<SphincsPlusData, SphincsError> {
-        let signature = self.sphincs_detached_sign(message, sk.as_ref())?;
-        if self.crypto_bytes != signature.len() {
-            return Err(SphincsError::BadLength(
-                self.crypto_publickey_bytes,
-                signature.len(),
-            ));
-        }
-        Ok(SphincsPlusData(signature))
+        sk: &SphincsPlusSecretKey,
+    ) -> Result<SphincsPlusSignature, SphincsError> {
+        detached_sign(message, &SecretKey::from_bytes(sk.as_ref())?)
+            .as_bytes()
+            .try_into()
     }
 
-    fn sphincs_detached_sign(
-        &self,
-        msg: &[u8],
-        sk: &[u8],
-    ) -> Result<Vec<u8>, pqcrypto_traits::Error> {
-        match self.sphincs_plus_type {
-            SphincsPlusType::SPHINCSSHAKE128F => {
-                gen_sphincs_detached_sign!(sphincsshake128fsimple, msg, sk)
-            },
-            SphincsPlusType::SPHINCSSHAKE128S => {
-                gen_sphincs_detached_sign!(sphincsshake128ssimple, msg, sk)
-            },
-            SphincsPlusType::SPHINCSSHAKE192F => {
-                gen_sphincs_detached_sign!(sphincsshake192fsimple, msg, sk)
-            },
-            SphincsPlusType::SPHINCSSHAKE192S => {
-                gen_sphincs_detached_sign!(sphincsshake192ssimple, msg, sk)
-            },
-            SphincsPlusType::SPHINCSSHAKE256F => {
-                gen_sphincs_detached_sign!(sphincsshake256fsimple, msg, sk)
-            },
-            SphincsPlusType::SPHINCSSHAKE256S => {
-                gen_sphincs_detached_sign!(sphincsshake256ssimple, msg, sk)
-            },
-            SphincsPlusType::SPHINCSSHA2128F => {
-                gen_sphincs_detached_sign!(sphincssha2128fsimple, msg, sk)
-            },
-            SphincsPlusType::SPHINCSSHA2128S => {
-                gen_sphincs_detached_sign!(sphincssha2128ssimple, msg, sk)
-            },
-            SphincsPlusType::SPHINCSSHA2192F => {
-                gen_sphincs_detached_sign!(sphincssha2192fsimple, msg, sk)
-            },
-            SphincsPlusType::SPHINCSSHA2192S => {
-                gen_sphincs_detached_sign!(sphincssha2192ssimple, msg, sk)
-            },
-            SphincsPlusType::SPHINCSSHA2256F => {
-                gen_sphincs_detached_sign!(sphincssha2256fsimple, msg, sk)
-            },
-            SphincsPlusType::SPHINCSSHA2256S => {
-                gen_sphincs_detached_sign!(sphincssha2256ssimple, msg, sk)
-            },
-        }
-    }
-
-    /// Verify the SPHINCS+ signature for a given `Sphincs` instance, based on the given message
+    /// Verify the SPHINCS+ signature for a given `SphincsPlus` instance, based on the given message
     /// and public-key.
     ///
     /// It returns `Err(SphincsError)` if the there is an error either about wrong data length or if
@@ -452,57 +393,15 @@ impl SphincsPlus {
     /// returns `Ok(())`, showing the validity of the given signature.
     pub fn verify(
         &self,
-        signature: &SphincsPlusData,
+        signature: &SphincsPlusSignature,
         message: &[u8],
-        pk: &SphincsPlusData,
+        pk: &SphincsPlusPublicKey,
     ) -> Result<(), SphincsError> {
-        self.sphincs_verify_detached_signature(signature.as_ref(), message, pk.as_ref())
-    }
-
-    fn sphincs_verify_detached_signature(
-        &self,
-        sig: &[u8],
-        msg: &[u8],
-        pk: &[u8],
-    ) -> Result<(), SphincsError> {
-        match self.sphincs_plus_type {
-            SphincsPlusType::SPHINCSSHAKE128F => {
-                gen_sphincs_verify_detached_signature!(sphincsshake128fsimple, sig, msg, pk)
-            },
-            SphincsPlusType::SPHINCSSHAKE128S => {
-                gen_sphincs_verify_detached_signature!(sphincsshake128ssimple, sig, msg, pk)
-            },
-            SphincsPlusType::SPHINCSSHAKE192F => {
-                gen_sphincs_verify_detached_signature!(sphincsshake192fsimple, sig, msg, pk)
-            },
-            SphincsPlusType::SPHINCSSHAKE192S => {
-                gen_sphincs_verify_detached_signature!(sphincsshake192ssimple, sig, msg, pk)
-            },
-            SphincsPlusType::SPHINCSSHAKE256F => {
-                gen_sphincs_verify_detached_signature!(sphincsshake256fsimple, sig, msg, pk)
-            },
-            SphincsPlusType::SPHINCSSHAKE256S => {
-                gen_sphincs_verify_detached_signature!(sphincsshake256ssimple, sig, msg, pk)
-            },
-            SphincsPlusType::SPHINCSSHA2128F => {
-                gen_sphincs_verify_detached_signature!(sphincssha2128fsimple, sig, msg, pk)
-            },
-            SphincsPlusType::SPHINCSSHA2128S => {
-                gen_sphincs_verify_detached_signature!(sphincssha2128ssimple, sig, msg, pk)
-            },
-            SphincsPlusType::SPHINCSSHA2192F => {
-                gen_sphincs_verify_detached_signature!(sphincssha2192fsimple, sig, msg, pk)
-            },
-            SphincsPlusType::SPHINCSSHA2192S => {
-                gen_sphincs_verify_detached_signature!(sphincssha2192ssimple, sig, msg, pk)
-            },
-            SphincsPlusType::SPHINCSSHA2256F => {
-                gen_sphincs_verify_detached_signature!(sphincssha2256fsimple, sig, msg, pk)
-            },
-            SphincsPlusType::SPHINCSSHA2256S => {
-                gen_sphincs_verify_detached_signature!(sphincssha2256ssimple, sig, msg, pk)
-            },
-        }
+        Ok(verify_detached_signature(
+            &DetachedSignature::from_bytes(signature.as_ref())?,
+            message,
+            &PublicKey::from_bytes(pk.as_ref())?,
+        )?)
     }
 }
 
@@ -511,10 +410,11 @@ mod tests {
     use super::*;
     use rand::prelude::*;
 
-    fn test_sphincs_plus(sphincs_type: SphincsPlusType) {
-        let sphincs = SphincsPlus::new(sphincs_type);
+    #[test]
+    fn test_sphincs_plus() {
+        let sp = SphincsPlus::new();
 
-        let kg = sphincs.keygen();
+        let kg = sp.keygen();
         assert!(kg.is_ok());
         let (pk, sk) = kg.unwrap();
 
@@ -522,88 +422,19 @@ mod tests {
         let len: u16 = rng.gen();
         let message = (0..len).map(|_| rng.gen::<u8>()).collect::<Vec<_>>();
 
-        let signing = sphincs.sign(&message, &sk);
+        let signing = sp.sign(&message, &sk);
         assert!(signing.is_ok());
         let signature = signing.unwrap();
 
-        assert!(sphincs.verify(&signature, &message, &pk).is_ok());
+        assert!(sp.verify(&signature, &message, &pk).is_ok());
 
-        let fake_signature = SphincsPlusData(
-            signature
-                .as_ref()
-                .iter()
-                .enumerate()
-                .map(|(i, &x)| if i == 0 { x ^ 1 } else { x })
-                .collect(),
-        );
+        let mut fake_signature = signature.clone();
+        fake_signature.0[0] ^= 1;
 
         assert!(matches!(
-            sphincs.verify(&fake_signature, &message, &pk),
+            sp.verify(&fake_signature, &message, &pk),
             Err(SphincsError::VerificationFailed(_))
         ));
-        println!(
-            "{:?} keygen, signing, and verify tests passed.",
-            sphincs.sphincs_plus_type
-        );
-    }
-
-    #[test]
-    fn test_sphincs_plus_shake128f() {
-        test_sphincs_plus(SphincsPlusType::SPHINCSSHAKE128F);
-    }
-
-    #[test]
-    fn test_sphincs_plus_shake128s() {
-        test_sphincs_plus(SphincsPlusType::SPHINCSSHAKE128S);
-    }
-
-    #[test]
-    fn test_sphincs_plus_shake192f() {
-        test_sphincs_plus(SphincsPlusType::SPHINCSSHAKE192F);
-    }
-
-    #[test]
-    fn test_sphincs_plus_shake192s() {
-        test_sphincs_plus(SphincsPlusType::SPHINCSSHAKE192S);
-    }
-
-    #[test]
-    fn test_sphincs_plus_shake256f() {
-        test_sphincs_plus(SphincsPlusType::SPHINCSSHAKE256F);
-    }
-
-    #[test]
-    fn test_sphincs_plus_shake256s() {
-        test_sphincs_plus(SphincsPlusType::SPHINCSSHAKE256S);
-    }
-
-    #[test]
-    fn test_sphincs_plus_sha2_128f() {
-        test_sphincs_plus(SphincsPlusType::SPHINCSSHA2128F);
-    }
-
-    #[test]
-    fn test_sphincs_plus_sha2_128s() {
-        test_sphincs_plus(SphincsPlusType::SPHINCSSHA2128S);
-    }
-
-    #[test]
-    fn test_sphincs_plus_sha2_192f() {
-        test_sphincs_plus(SphincsPlusType::SPHINCSSHA2192F);
-    }
-
-    #[test]
-    fn test_sphincs_plus_sha2_192s() {
-        test_sphincs_plus(SphincsPlusType::SPHINCSSHA2192S);
-    }
-
-    #[test]
-    fn test_sphincs_plus_sha2_256f() {
-        test_sphincs_plus(SphincsPlusType::SPHINCSSHA2256F);
-    }
-
-    #[test]
-    fn test_sphincs_plus_sha2_256s() {
-        test_sphincs_plus(SphincsPlusType::SPHINCSSHA2256S);
+        println!("SPHINCS+ wrapper keygen, signing, and verify tests passed.");
     }
 }

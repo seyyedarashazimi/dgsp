@@ -1,8 +1,11 @@
-// #define SPX_SHA256_BLOCK_BYTES 64
-// #define SPX_SHA256_OUTPUT_BYTES 32
-//
-// #define SPX_SHA512_BLOCK_BYTES 128
-// #define SPX_SHA512_OUTPUT_BYTES 64
+#![allow(dead_code)]
+
+pub const SPX_SHA256_ADDR_BYTES: usize = 22;
+pub const SPX_SHA256_BLOCK_BYTES: usize = 64;
+pub const SPX_SHA256_OUTPUT_BYTES: usize = 32;
+
+pub const SPX_SHA512_BLOCK_BYTES: usize = 128;
+pub const SPX_SHA512_OUTPUT_BYTES: usize = 64;
 
 /*
  * Offsets of various fields in the address structure when we use SHA2 as

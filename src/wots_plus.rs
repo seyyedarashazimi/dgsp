@@ -1,178 +1,392 @@
-use crate::params::WOTSPLUS_ADRS_LAYER;
-use crate::sha2_offsets::*;
-use rand::rngs::OsRng;
-use rand::RngCore;
-// layer in WOTS+ for user is SPX_D
-// tree_addr: choose a "secure" random 64-bit value
+use crate::utils::u64_to_bytes;
+use crate::wots_plus::adrs::Adrs;
+use crate::wots_plus::adrs::AdrsType::{WotsHash, WotsPk, WotsPrf};
 
-#[derive(Copy, Clone, Debug)]
-#[repr(usize)]
-pub enum AdrsType {
-    /// SPX_ADDR_TYPE_WOTS: 0
-    WotsHash,
-    /// SPX_ADDR_TYPE_WOTSPK: 1
-    WotsPk,
-    /// SPX_ADDR_TYPE_HASHTREE: 2, won't be used.
-    Tree,
-    /// SPX_ADDR_TYPE_FORSTREE: 3, won't be used.
-    ForsTree,
-    /// SPX_ADDR_TYPE_FORSPK: 4, won't be used.
-    ForsRoots,
-    /// SPX_ADDR_TYPE_WOTSPRF: 5
-    WotsPrf,
-    /// SPX_ADDR_TYPE_FORSPRF: 6, won't be used.
-    ForsPrf,
+#[cfg(feature = "sphincs_sha2_128f")]
+use crate::sphincs_plus::params_sphincs_sha2_128f::*;
+#[cfg(feature = "sphincs_sha2_128s")]
+use crate::sphincs_plus::params_sphincs_sha2_128s::*;
+#[cfg(feature = "sphincs_sha2_192f")]
+use crate::sphincs_plus::params_sphincs_sha2_192f::*;
+#[cfg(feature = "sphincs_sha2_192s")]
+use crate::sphincs_plus::params_sphincs_sha2_192s::*;
+#[cfg(feature = "sphincs_sha2_256f")]
+use crate::sphincs_plus::params_sphincs_sha2_256f::*;
+#[cfg(feature = "sphincs_sha2_256s")]
+use crate::sphincs_plus::params_sphincs_sha2_256s::*;
+#[cfg(feature = "sphincs_shake_128f")]
+use crate::sphincs_plus::params_sphincs_shake_128f::*;
+#[cfg(feature = "sphincs_shake_128s")]
+use crate::sphincs_plus::params_sphincs_shake_128s::*;
+#[cfg(feature = "sphincs_shake_192f")]
+use crate::sphincs_plus::params_sphincs_shake_192f::*;
+#[cfg(feature = "sphincs_shake_192s")]
+use crate::sphincs_plus::params_sphincs_shake_192s::*;
+#[cfg(feature = "sphincs_shake_256f")]
+use crate::sphincs_plus::params_sphincs_shake_256f::*;
+#[cfg(feature = "sphincs_shake_256s")]
+use crate::sphincs_plus::params_sphincs_shake_256s::*;
+
+#[cfg(any(
+    feature = "sphincs_sha2_128f",
+    feature = "sphincs_sha2_128s",
+    feature = "sphincs_sha2_192f",
+    feature = "sphincs_sha2_192s",
+    feature = "sphincs_sha2_256f",
+    feature = "sphincs_sha2_256s",
+))]
+use crate::hash::sha2::DgspHasher;
+
+#[cfg(any(
+    feature = "sphincs_shake_128f",
+    feature = "sphincs_shake_128s",
+    feature = "sphincs_shake_192f",
+    feature = "sphincs_shake_192s",
+    feature = "sphincs_shake_256f",
+    feature = "sphincs_shake_256s",
+))]
+use crate::hash::shake::DgspHasher;
+
+pub mod adrs;
+
+pub const WTS_ADRS_RAND_BYTES: usize = 8;
+
+#[derive(Clone, Debug)]
+pub struct WotsPlus {
+    pub adrs_rand: [u8; 8],
+    hasher: DgspHasher,
 }
-
-/// The address `Adrs` is a 32-byte value and follows the structure of WOTS+ described in
-/// [SPHINCS+ latest submission](https://sphincs.org/data/sphincs+-r3.1-specification.pdf),
-/// but with a few changes to make it suitable for a standalone WOTS+.
-///
-/// The 32-bytes values of `Adrs` consists of at most 6 parts in general, determined by
-/// `AdrsType`. Among possible cases of `AdrsType` for WOTS+, `Adrs` contains the following
-/// parts:
-/// * `layer address`:  A single byte set to [`WOTSPLUS_ADRS_LAYER`] to be distinct from ADRS of
-///                     SPHINCS+,
-/// * `tree address`:   An 8-byte random value to make it unique among per use of each user to be
-///                     secure against multi-target attack.
-/// * `type`:           A single byte set by [`AdrsType`] which will be either
-///                     [`AdrsType::WotsHash`], [`AdrsType::WotsPk`], or [`AdrsType::WotsPRF`].
-///                     Other types are still defined for [`AdrsType`] only to be compatible with
-///                     ADRS defined in SPHINCS+ but will not be used here.
-/// * `key pair address`: TODO: it is currently 0 but needs to be changed
-/// * `chain address`:  a single byte, corresponding to each chain of WOTS+.
-/// * `hash address`:   a single byte, corresponding to each height in a chain in WOTS+.
-#[derive(Copy, Clone, Default, Debug)]
-pub struct Adrs([u8; 32]);
-impl Adrs {
-    pub fn new_full(adrs_type: AdrsType) -> Self {
-        let mut adrs = Self([0; 32]);
-        adrs.set_type(adrs_type as usize as u32);
-        adrs.set_layer_addr(WOTSPLUS_ADRS_LAYER);
-        adrs.assign_rand();
-        adrs
-    }
-
-    pub fn set_rand(&mut self, rand: [u8; 8]) {
-        self.set_tree_addr(u64::from_be_bytes(rand))
-    }
-
-    fn create_rand(&self) -> [u8; 8] {
-        let mut r: [u8; 8] = [0; 8];
-        OsRng.fill_bytes(&mut r);
-        r
-    }
-
-    pub fn assign_rand(&mut self) {
-        self.set_rand(self.create_rand());
-    }
-
-    pub fn get_rand(&self) -> [u8; 8] {
-        self.0[SPX_OFFSET_TREE..SPX_OFFSET_TREE + 8]
-            .try_into()
-            .unwrap()
-    }
-
-    /// Specify which level of Merkle tree (the "layer") we're working on.
-    pub fn set_layer_addr(&mut self, layer: u32) {
-        self.set_byte_at(layer as u8, SPX_OFFSET_LAYER);
-    }
-
-    /// Specify which Merkle tree within the level (the "tree address") we're working on.
-    pub fn set_tree_addr(&mut self, tree: u64) {
-        self.set_u64_at(tree, SPX_OFFSET_TREE);
-    }
-
-    /// Specify the reason we'll use this address structure for, that is, what
-    /// hash will we compute with it.  This is used so that unrelated types of
-    /// hashes don't accidentally get the same address structure. The type will
-    /// be one of the SPX_ADDR_TYPE constants.
-    pub fn set_type(&mut self, adrs_type: u32) {
-        self.set_byte_at(adrs_type as u8, SPX_OFFSET_TYPE);
-    }
-
-    /// Copy the layer and tree fields of the address structure.  This is used
-    /// when we're doing multiple types of hashes within the same Merkle tree.
-    pub fn copy_subtree_addr(&self, dst: &mut [u8; 32]) {
-        dst[0..SPX_OFFSET_TREE + 8].copy_from_slice(&self.0[0..SPX_OFFSET_TREE + 8]);
-    }
-
-    /// Specify which Merkle leaf we're working on; that is, which OTS keypair
-    /// we're talking about.
-    pub fn set_keypair_addr(&mut self, keypair: u32) {
-        self.set_byte_at(keypair as u8, SPX_OFFSET_KP_ADDR1);
-    }
-
-    /// Copy the layer, tree and keypair fields of the address structure.  This is
-    /// used when we're doing multiple things within the same OTS keypair.
-    pub fn copy_keypair_addr(&self, dst: &mut [u8; 32]) {
-        self.copy_subtree_addr(dst);
-        dst[SPX_OFFSET_KP_ADDR1] = self.get_byte_at(SPX_OFFSET_KP_ADDR1);
-    }
-
-    /// Specify which Merkle chain within the OTS we're working with
-    /// (the chain address).
-    pub fn set_chain_addr(mut self, chain: u32) {
-        self.set_byte_at(chain as u8, SPX_OFFSET_CHAIN_ADDR);
-    }
-
-    /// Specify where in the Merkle chain we are
-    /// (the hash address).
-    pub fn set_hash_addr(mut self, hash: u32) {
-        self.set_byte_at(hash as u8, SPX_OFFSET_HASH_ADDR);
-    }
-
-    /// Specify the height of the node in the Merkle/FORS tree we are in
-    /// (the tree height).
-    pub fn set_tree_height(mut self, tree_height: u32) {
-        self.set_byte_at(tree_height as u8, SPX_OFFSET_TREE_HGT);
-    }
-
-    /// Specify the distance from the left edge of the node in the Merkle/FORS tree
-    /// (the tree index).
-    pub fn set_tree_index(&mut self, tree_index: u32) {
-        self.set_u32_at(tree_index, SPX_OFFSET_TREE_INDEX);
-    }
-
-    fn set_byte_at(&mut self, value: u8, index: usize) {
-        self.0[index] = value;
-    }
-
-    fn get_byte_at(&self, index: usize) -> u8 {
-        self.0[index]
-    }
-
-    fn set_u32_at(&mut self, value: u32, start_index: usize) {
-        self.0[start_index..start_index + 4].copy_from_slice(&value.to_be_bytes());
-    }
-
-    fn get_u32_at(&self, start_index: usize) -> u32 {
-        let bytes: [u8; 4] = self.0[start_index..start_index + 4]
-            .try_into()
-            .expect("Index out of bounds or incorrect length");
-
-        u32::from_be_bytes(bytes)
-    }
-
-    fn set_u64_at(&mut self, value: u64, start_index: usize) {
-        self.0[start_index..start_index + 8].copy_from_slice(&value.to_be_bytes());
-    }
-
-    fn get_u64_at(&self, start_index: usize) -> u64 {
-        let bytes: [u8; 8] = self.0[start_index..start_index + 8]
-            .try_into()
-            .expect("Index out of bounds or incorrect length");
-
-        u64::from_be_bytes(bytes)
-    }
-}
-
-pub struct WotsPlus;
 
 impl WotsPlus {
-    // pub fn keygen(adrs_type: AdrsType) -> Adrs {}
+    pub fn new(pub_seed: &[u8; SPX_N]) -> Self {
+        let hasher = DgspHasher::new(pub_seed);
+        Self {
+            adrs_rand: [0_u8; 8],
+            hasher,
+        }
+    }
 
-    fn gen_chain(out: &mut , const unsigned char *in,
-    unsigned int start, unsigned int steps,
-    const spx_ctx *ctx, uint32_t addr[8])
+    pub fn new_from_rand(adrs_rand: &[u8], pub_seed: &[u8; SPX_N]) -> Self {
+        let hasher = DgspHasher::new(pub_seed);
+        Self {
+            adrs_rand: adrs_rand.try_into().unwrap(),
+            hasher,
+        }
+    }
+
+    pub fn keygen(&mut self, sk_seed: &[u8]) -> ([u8; SPX_WOTS_BYTES], [u8; SPX_WOTS_BYTES]) {
+        let (mut adrs, r) = Adrs::new_full(WotsPrf);
+        self.adrs_rand = r;
+        self.wots_gen_pk_sk(sk_seed, 0, &mut adrs)
+    }
+
+    pub fn sign(&self, message: &[u8], sk: &[u8]) -> [u8; SPX_WOTS_BYTES] {
+        let mut adrs = Adrs::new_full_from_rand(WotsHash, &self.adrs_rand);
+        self.wots_gen_sig(sk, 0, &mut adrs, message)
+    }
+
+    pub fn sign_and_pk(
+        &self,
+        message: &[u8],
+        sk_seed: &[u8; SPX_N],
+    ) -> ([u8; SPX_WOTS_BYTES], [u8; SPX_WOTS_BYTES]) {
+        let mut adrs = Adrs::new_full_from_rand(WotsPrf, &self.adrs_rand);
+        self.gen_sig_and_pk(sk_seed, 0, &mut adrs, message)
+    }
+
+    pub fn verify(&self, signature: &[u8], message: &[u8], pk: &[u8]) -> bool {
+        let mut adrs = Adrs::new_full_from_rand(WotsHash, &self.adrs_rand);
+        let calculated_pk = self.wots_pk_from_sig(signature, message, 0, &mut adrs);
+        if calculated_pk != pk {
+            return false;
+        }
+        true
+    }
+
+    /// Computes the chaining function.
+    /// out and in have to be n-byte arrays.
+    ///
+    /// Interprets in as start-th value of the chain.
+    /// addr has to contain the address of the chain.
+    fn gen_chain(
+        &self,
+        output: &mut [u8],
+        input: &[u8],
+        start: usize,
+        steps: usize,
+        adrs: &mut Adrs,
+    ) {
+        // Initialize buf value at position 'start'.
+        output[..SPX_N].copy_from_slice(input[..SPX_N].as_ref());
+
+        // Iterate 'steps' calls to the hash function F.
+        for i in start..(start + steps) {
+            if i >= SPX_WOTS_W {
+                break;
+            }
+            adrs.set_hash_addr(i as u32);
+            self.hasher.spx_f_inplace(output[..SPX_N].as_mut(), 1, adrs);
+        }
+    }
+
+    /// Converts an array of bytes into integers in base `w`.
+    fn base_w(output: &mut [u32], out_len: usize, input: &[u8]) {
+        let mut bits = 0;
+        let mut total: u8 = 0;
+        let mut input_index = 0;
+
+        for out in output[..out_len].iter_mut() {
+            if bits == 0 {
+                // Load a new byte from input
+                total = input[input_index];
+                input_index += 1;
+                bits += 8;
+            }
+
+            bits -= SPX_WOTS_LOGW;
+            // Extract SPX_WOTS_LOGW bits and convert to u32
+            *out = ((total >> bits) & ((SPX_WOTS_W - 1) as u8)) as u32;
+        }
+    }
+
+    /// Computes the WOTS+ checksum over a message (in base_w).
+    fn wots_checksum(csum_base_w: &mut [u32], msg_base_w: &[u32]) {
+        let mut csum: u32 = 0;
+
+        // Compute the checksum
+        for &msg in msg_base_w.iter().take(SPX_WOTS_LEN1) {
+            csum += (SPX_WOTS_W as u32) - 1 - msg;
+        }
+
+        // Make sure expected empty zero bits are the least significant bits.
+        // Prepare the checksum for conversion to base_w
+        let shift = (8 - ((SPX_WOTS_LEN2 * SPX_WOTS_LOGW) % 8)) % 8;
+        csum <<= shift;
+
+        // Convert the checksum to bytes
+        let csum_bytes = u64_to_bytes(csum as u64);
+
+        // Convert checksum bytes to base_w
+        Self::base_w(csum_base_w, SPX_WOTS_LEN2, &csum_bytes);
+    }
+
+    /// Takes a message and derives the matching chain lengths.
+    fn chain_lengths(lengths: &mut [u32], msg: &[u8]) {
+        Self::base_w(lengths, SPX_WOTS_LEN1, msg);
+        let lengths_msg = lengths[..SPX_WOTS_LEN1].to_vec();
+        Self::wots_checksum(lengths[SPX_WOTS_LEN1..].as_mut(), &lengths_msg);
+    }
+
+    /// Takes a WOTS signature and an n-byte message, computes a WOTS public key.
+    ///
+    /// Writes the computed public key to 'pk'.
+    fn wots_pk_from_sig(
+        &self,
+        sig: &[u8],
+        msg: &[u8],
+        leaf_idx: u32,
+        adrs: &mut Adrs,
+    ) -> [u8; SPX_WOTS_BYTES] {
+        let mut pk_buf = [0_u8; SPX_WOTS_BYTES];
+        let mut pk_adrs = *adrs;
+
+        let mut lengths = [0_u32; SPX_WOTS_LEN];
+        Self::chain_lengths(lengths.as_mut(), msg);
+
+        adrs.set_type(WotsHash);
+        for i in 0..SPX_WOTS_LEN {
+            adrs.set_chain_addr(i as u32);
+            self.gen_chain(
+                pk_buf[i * SPX_N..(i + 1) * SPX_N].as_mut(),
+                sig[i * SPX_N..(i + 1) * SPX_N].as_ref(),
+                lengths[i] as usize,
+                SPX_WOTS_W - 1 - (lengths[i] as usize),
+                adrs,
+            );
+        }
+
+        pk_adrs.set_type(WotsPk);
+        pk_adrs.set_keypair_addr(leaf_idx);
+        // Do the final thash to generate the public keys
+        self.hasher
+            .spx_t_l_inplace(pk_buf.as_mut(), SPX_WOTS_LEN, &pk_adrs);
+
+        pk_buf
+    }
+
+    fn wots_gen_pk_sk(
+        &self,
+        sk_seed: &[u8],
+        leaf_idx: u32,
+        adrs: &mut Adrs,
+    ) -> ([u8; SPX_WOTS_BYTES], [u8; SPX_WOTS_BYTES]) {
+        let mut pk_buf = [0_u8; SPX_WOTS_BYTES];
+        let mut sk_buf = [0_u8; SPX_WOTS_BYTES];
+        let mut buf_index: usize;
+
+        let mut pk_adrs = *adrs;
+        let mut sk_adrs = *adrs;
+        sk_adrs.set_type(WotsPrf);
+        sk_adrs.set_keypair_addr(leaf_idx);
+
+        for i in 0..SPX_WOTS_LEN {
+            buf_index = i * SPX_N;
+
+            // Start with the secret seed
+            sk_adrs.set_chain_addr(i as u32);
+            sk_adrs.set_hash_addr(0_u32);
+            sk_adrs.set_type(WotsPrf);
+            self.hasher.spx_prf(
+                sk_buf[buf_index..buf_index + SPX_N].as_mut(),
+                sk_seed,
+                &sk_adrs,
+            );
+
+            sk_adrs.set_type(WotsHash);
+            self.gen_chain(
+                pk_buf[buf_index..buf_index + SPX_N].as_mut(),
+                sk_buf[buf_index..buf_index + SPX_N].as_ref(),
+                0,
+                SPX_WOTS_W - 1,
+                &mut sk_adrs,
+            );
+        }
+
+        pk_adrs.set_type(WotsPk);
+        pk_adrs.set_keypair_addr(leaf_idx);
+        // Do the final thash to generate the public keys
+        self.hasher
+            .spx_t_l_inplace(pk_buf.as_mut(), SPX_WOTS_LEN, &pk_adrs);
+
+        (pk_buf, sk_buf)
+    }
+
+    fn wots_gen_sig(
+        &self,
+        sk: &[u8],
+        leaf_idx: u32,
+        adrs: &mut Adrs,
+        message: &[u8],
+    ) -> [u8; SPX_WOTS_BYTES] {
+        let mut sig_buf = [0_u8; SPX_WOTS_BYTES];
+        let mut buf_index: usize;
+
+        // Calculate chain steps for the given message
+        let mut steps = [0_u32; SPX_WOTS_LEN];
+        Self::chain_lengths(steps.as_mut(), message);
+
+        adrs.set_keypair_addr(leaf_idx);
+        adrs.set_type(WotsHash);
+        for i in 0..SPX_WOTS_LEN {
+            buf_index = i * SPX_N;
+
+            // Calculate signature from sk, based on the steps
+            self.gen_chain(
+                sig_buf[buf_index..buf_index + SPX_N].as_mut(),
+                sk[buf_index..buf_index + SPX_N].as_ref(),
+                0,
+                steps[i] as usize,
+                adrs,
+            );
+        }
+        sig_buf
+    }
+
+    fn gen_sig_and_pk(
+        &self,
+        sk_seed: &[u8],
+        leaf_idx: u32,
+        adrs: &mut Adrs,
+        message: &[u8],
+    ) -> ([u8; SPX_WOTS_BYTES], [u8; SPX_WOTS_BYTES]) {
+        let mut pk_buf = [0_u8; SPX_WOTS_BYTES];
+        let mut sk_buf = [0_u8; SPX_WOTS_BYTES];
+        let mut sig_buf = [0_u8; SPX_WOTS_BYTES];
+        let mut buf_index: usize;
+
+        // Calculate chain steps for the given message
+        let mut steps = [0_u32; SPX_WOTS_LEN];
+        Self::chain_lengths(steps.as_mut(), message);
+
+        let mut pk_adrs = *adrs;
+        let mut sk_adrs = *adrs;
+        sk_adrs.set_type(WotsPrf);
+        sk_adrs.set_keypair_addr(leaf_idx);
+
+        for i in 0..SPX_WOTS_LEN {
+            buf_index = i * SPX_N;
+
+            // Start with the secret seed
+            sk_adrs.set_chain_addr(i as u32);
+            sk_adrs.set_hash_addr(0_u32);
+            sk_adrs.set_type(WotsPrf);
+            self.hasher.spx_prf(
+                sk_buf[buf_index..buf_index + SPX_N].as_mut(),
+                sk_seed,
+                &sk_adrs,
+            );
+
+            pk_buf[buf_index..buf_index + SPX_N]
+                .copy_from_slice(sk_buf[buf_index..buf_index + SPX_N].as_ref());
+            sig_buf[buf_index..buf_index + SPX_N]
+                .copy_from_slice(sk_buf[buf_index..buf_index + SPX_N].as_ref());
+
+            sk_adrs.set_type(WotsHash);
+            for j in 0..(SPX_WOTS_W - 1) {
+                if j >= SPX_WOTS_W {
+                    break;
+                }
+
+                if j == steps[i] as usize {
+                    sig_buf[buf_index..buf_index + SPX_N]
+                        .copy_from_slice(pk_buf[buf_index..buf_index + SPX_N].as_ref());
+                }
+
+                sk_adrs.set_hash_addr(j as u32);
+                self.hasher
+                    .spx_f_inplace(pk_buf[..SPX_N].as_mut(), 1, &sk_adrs);
+            }
+        }
+
+        pk_adrs.set_type(WotsPk);
+        pk_adrs.set_keypair_addr(leaf_idx);
+        // Do the final thash to generate the public keys
+        self.hasher
+            .spx_t_l_inplace(pk_buf.as_mut(), SPX_WOTS_LEN, &pk_adrs);
+
+        (sig_buf, pk_buf)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rand::prelude::*;
+    use rand::rngs::OsRng;
+
+    #[test]
+    fn test_wots_plus() {
+        let mut pub_seed = [0; SPX_N];
+        let mut sk_seed = [0; SPX_N];
+        OsRng.fill_bytes(&mut pub_seed);
+        OsRng.fill_bytes(&mut sk_seed);
+
+        let mut wp = WotsPlus::new(&pub_seed);
+
+        let (pk, sk) = wp.keygen(&sk_seed);
+
+        let mut rng = thread_rng();
+        let len: u16 = rng.gen();
+        let message = (0..len).map(|_| rng.gen::<u8>()).collect::<Vec<_>>();
+
+        let signature = wp.sign(&message, &sk);
+
+        assert!(wp.verify(&signature, &message, &pk));
+
+        let mut fake_signature = signature;
+        fake_signature[0] ^= 1;
+
+        assert!(!wp.verify(&fake_signature, &message, &pk));
+        println!("WOTS+ keygen, signing, and verify tests passed.");
+    }
 }

@@ -20,13 +20,3 @@ pub enum GroupSignatureError {
     VerificationFailed,
     // Add more error variants as needed
 }
-
-use serde::{Deserialize, Serialize};
-
-#[derive(Serialize, Deserialize, Debug, Clone, Copy, Hash, PartialEq, PartialOrd)]
-pub enum SeleniteErrors {
-    BLSAggregationFailed,
-    DecodingFromHexFailed,
-    FailedToGetFile,
-    FileDoesNotExist,
-}

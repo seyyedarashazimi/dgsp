@@ -1,0 +1,63 @@
+fn main() {
+    let sphincs_features = [
+        (
+            "sphincs_shake_128f",
+            std::env::var("CARGO_FEATURE_SPHINCS_SHAKE_128F").is_ok(),
+        ),
+        (
+            "sphincs_shake_128s",
+            std::env::var("CARGO_FEATURE_SPHINCS_SHAKE_128S").is_ok(),
+        ),
+        (
+            "sphincs_shake_192f",
+            std::env::var("CARGO_FEATURE_SPHINCS_SHAKE_192F").is_ok(),
+        ),
+        (
+            "sphincs_shake_192s",
+            std::env::var("CARGO_FEATURE_SPHINCS_SHAKE_192S").is_ok(),
+        ),
+        (
+            "sphincs_shake_256f",
+            std::env::var("CARGO_FEATURE_SPHINCS_SHAKE_256F").is_ok(),
+        ),
+        (
+            "sphincs_shake_256s",
+            std::env::var("CARGO_FEATURE_SPHINCS_SHAKE_256S").is_ok(),
+        ),
+        (
+            "sphincs_sha2_128f",
+            std::env::var("CARGO_FEATURE_SPHINCS_SHA2_128F").is_ok(),
+        ),
+        (
+            "sphincs_sha2_128s",
+            std::env::var("CARGO_FEATURE_SPHINCS_SHA2_128S").is_ok(),
+        ),
+        (
+            "sphincs_sha2_192f",
+            std::env::var("CARGO_FEATURE_SPHINCS_SHA2_192F").is_ok(),
+        ),
+        (
+            "sphincs_sha2_192s",
+            std::env::var("CARGO_FEATURE_SPHINCS_SHA2_192S").is_ok(),
+        ),
+        (
+            "sphincs_sha2_256f",
+            std::env::var("CARGO_FEATURE_SPHINCS_SHA2_256F").is_ok(),
+        ),
+        (
+            "sphincs_sha2_256s",
+            std::env::var("CARGO_FEATURE_SPHINCS_SHA2_256S").is_ok(),
+        ),
+    ];
+
+    let enabled_count = sphincs_features
+        .iter()
+        .filter(|(_, enabled)| *enabled)
+        .count();
+
+    if enabled_count == 0 {
+        panic!("No SPHINCS+ variant feature enabled. Enable exactly one.");
+    } else if enabled_count > 1 {
+        panic!("Multiple SPHINCS+ variant features enabled. Enable exactly one.");
+    }
+}
