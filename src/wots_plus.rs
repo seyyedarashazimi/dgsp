@@ -328,23 +328,24 @@ impl WotsPlus {
 
             pk_buf[buf_index..buf_index + SPX_N]
                 .copy_from_slice(sk_buf[buf_index..buf_index + SPX_N].as_ref());
-            sig_buf[buf_index..buf_index + SPX_N]
-                .copy_from_slice(sk_buf[buf_index..buf_index + SPX_N].as_ref());
 
             sk_adrs.set_type(WotsHash);
-            for j in 0..(SPX_WOTS_W - 1) {
-                if j >= SPX_WOTS_W {
-                    break;
-                }
-
+            for j in 0.. {
                 if j == steps[i] as usize {
                     sig_buf[buf_index..buf_index + SPX_N]
                         .copy_from_slice(pk_buf[buf_index..buf_index + SPX_N].as_ref());
                 }
 
+                if j == SPX_WOTS_W - 1 {
+                    break;
+                }
+
                 sk_adrs.set_hash_addr(j as u32);
-                self.hasher
-                    .spx_f_inplace(pk_buf[..SPX_N].as_mut(), 1, &sk_adrs);
+                self.hasher.spx_f_inplace(
+                    pk_buf[buf_index..buf_index + SPX_N].as_mut(),
+                    1,
+                    &sk_adrs,
+                );
             }
         }
 
@@ -387,6 +388,15 @@ mod tests {
         fake_signature[0] ^= 1;
 
         assert!(!wp.verify(&fake_signature, &message, &pk));
+
+        let wp_same = WotsPlus::new_from_rand(&wp.adrs_rand, &pub_seed);
+        let (sig_same, pk_same) = wp.sign_and_pk(&message, &sk_seed);
+
+        assert_eq!(sig_same, signature);
+        assert_eq!(pk_same, pk);
+
+        assert!(wp_same.verify(&sig_same, &message, &pk_same));
+
         println!("WOTS+ keygen, signing, and verify tests passed.");
     }
 }

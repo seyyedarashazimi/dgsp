@@ -1,10 +1,18 @@
-use crate::params::{DGSP_BYTES, DGSP_N, DGSP_PK_BYTES, DGSP_POS_BYTES, DGSP_SK_BYTES};
-use crate::sphincs_plus::{SphincsPlus, SphincsPlusSecretKey, SphincsPlusSignature};
+use crate::array_struct;
+use crate::errors::Error;
+use crate::params::{DGSP_N, DGSP_POS_BYTES};
+use crate::sphincs_plus::params_sphincs_sha2_128f::{SPX_N, SPX_WOTS_BYTES, SPX_WOTS_PK_BYTES};
+use crate::sphincs_plus::{
+    SphincsPlus, SphincsPlusPublicKey, SphincsPlusSecretKey, SphincsPlusSignature,
+};
+use crate::utils::{bytes_to_usize, u64_to_bytes, usize_to_bytes};
+use crate::wots_plus::WotsPlus;
 use aes::cipher::{generic_array::GenericArray, BlockDecrypt, BlockEncrypt, KeyInit};
 use aes::Aes256;
 use rand::rngs::OsRng;
 use rand::RngCore;
 use rayon::prelude::*;
+use zeroize::Zeroize;
 
 #[cfg(any(
     feature = "sphincs_sha2_128f",
@@ -15,12 +23,6 @@ use rayon::prelude::*;
     feature = "sphincs_sha2_256s",
 ))]
 use crate::hash::sha2::DgspHasher;
-
-use crate::sphincs_plus::params_sphincs_sha2_128f::{
-    SPX_BYTES, SPX_N, SPX_PK_BYTES, SPX_WOTS_BYTES, SPX_WOTS_PK_BYTES,
-};
-use crate::utils::{bytes_to_usize, u64_to_bytes, usize_to_bytes};
-use crate::wots_plus::{WotsPlus, WTS_ADRS_RAND_BYTES};
 #[cfg(any(
     feature = "sphincs_sha2_128f",
     feature = "sphincs_sha2_128s",
@@ -30,6 +32,11 @@ use crate::wots_plus::{WotsPlus, WTS_ADRS_RAND_BYTES};
     feature = "sphincs_sha2_256s",
 ))]
 use sha2::Digest;
+
+#[cfg(feature = "serialization")]
+use serde::{Deserialize, Serialize};
+#[cfg(feature = "serialization")]
+use serde_big_array::BigArray;
 
 pub struct PLMEntry {
     is_active: bool,
@@ -45,6 +52,31 @@ impl PLMEntry {
     }
 }
 
+pub struct CSREntry {
+    wots_adrs_rand: [u8; 8],
+}
+
+array_struct!(DGSPMSK, DGSP_N);
+
+#[derive(Clone, Zeroize)]
+pub struct DGSPManagerSecretKey {
+    pub msk: DGSPMSK,
+    pub spx_sk: SphincsPlusSecretKey,
+}
+
+#[derive(Clone, Zeroize)]
+pub struct DGSPManagerPublicKey {
+    pub spx_pk: SphincsPlusPublicKey,
+}
+
+#[derive(Clone, Zeroize)]
+pub struct DGSPSignature {
+    pub wots_sig: [u8; SPX_WOTS_BYTES], // todo: zeroize wots data
+    pub pos: [u8; DGSP_POS_BYTES],
+    pub spx_sig: SphincsPlusSignature,
+    pub wots_adrs_rand: [u8; 8],
+}
+
 #[derive(Default)]
 pub struct DGSPManager;
 
@@ -53,40 +85,41 @@ impl DGSPManager {
         DGSPManager
     }
 
-    pub fn keygen() -> ([u8; DGSP_PK_BYTES], [u8; DGSP_SK_BYTES]) {
-        let mut sk = [0u8; DGSP_SK_BYTES];
-
+    pub fn keygen() -> (DGSPManagerPublicKey, DGSPManagerSecretKey, Vec<[u8; 16]>) {
         let sp = SphincsPlus;
+        let (spx_pk, spx_sk) = sp.keygen().expect("failed to run SPHINCS+ keygen");
+        let mut msk = DGSPMSK::from([0u8; DGSP_N]);
+        OsRng.fill_bytes(&mut msk.0);
 
-        let (pk_sp, sk_sp) = sp.keygen().expect("failed to run SPHINCS+ keygen");
+        let sk = DGSPManagerSecretKey { msk, spx_sk };
+        let pk = DGSPManagerPublicKey { spx_pk };
 
-        OsRng.fill_bytes(&mut sk[..DGSP_N]); // msk
-        sk[DGSP_N..].copy_from_slice(&sk_sp.as_ref()[..2 * SPX_N]);
-
-        (pk_sp.as_ref().try_into().unwrap(), sk)
+        (pk, sk, Vec::new())
     }
 
     pub fn join(
-        msk: &[u8; DGSP_N],
+        msk: &DGSPMSK,
         username: &str,
         plm: &mut Vec<PLMEntry>,
+        ctr_ids: &mut Vec<u64>,
     ) -> (usize, [u8; DGSP_N]) {
         let new_id = plm.len();
         plm.push(PLMEntry::new(true, username.to_string()));
         let cid = Self::calculate_cid(msk, new_id);
+        ctr_ids.push(0);
         (new_id, cid)
     }
 
     pub fn req(
-        msk: &[u8; DGSP_N],
+        msk: &DGSPMSK,
         id: usize,
         cid: [u8; DGSP_N],
-        wotsplus_public_keys: Vec<[u8; SPX_WOTS_PK_BYTES]>,
+        wotsplus_public_keys: &Vec<[u8; SPX_WOTS_PK_BYTES]>,
         plm: &Vec<PLMEntry>,
         sphincs_plus_secret_key: &SphincsPlusSecretKey,
         ctr_ids: &mut Vec<u64>,
     ) -> Option<Vec<([u8; 16], SphincsPlusSignature)>> {
-        if !Self::is_req_valid(msk, id, cid, plm) {
+        if !Self::is_req_valid(msk, id, &cid, plm) {
             return None;
         }
         Some(Self::generate_certificates(
@@ -99,14 +132,14 @@ impl DGSPManager {
     }
 
     pub fn generate_certificates(
-        msk: &[u8; DGSP_N],
+        msk: &DGSPMSK,
         id: usize,
-        wotsplus_public_keys: Vec<[u8; SPX_WOTS_PK_BYTES]>,
+        wotsplus_public_keys: &Vec<[u8; SPX_WOTS_PK_BYTES]>,
         ctr_id: &mut u64,
         sphincs_plus_sk: &SphincsPlusSecretKey,
     ) -> Vec<([u8; 16], SphincsPlusSignature)> {
         // Initialize AES-256 cipher
-        let cipher = Aes256::new(GenericArray::from_slice(msk));
+        let cipher = Aes256::new(GenericArray::from_slice(msk.as_ref()));
 
         let s: Vec<([u8; 16], SphincsPlusSignature)> = wotsplus_public_keys
             .par_iter()
@@ -137,7 +170,7 @@ impl DGSPManager {
     }
 
     pub fn revoke(
-        msk: &[u8; DGSP_N],
+        msk: &DGSPMSK,
         plm: &mut Vec<PLMEntry>,
         to_be_revoked: Vec<usize>,
         ctr_ids: &mut Vec<u64>,
@@ -152,14 +185,14 @@ impl DGSPManager {
         });
     }
 
-    pub fn open(msk: &[u8; DGSP_N], plm: &mut Vec<PLMEntry>, dgsp_pos: &[u8; 16]) -> Option<usize> {
+    pub fn open(msk: &DGSPMSK, plm: &mut Vec<PLMEntry>, dgsp_pos: &[u8; 16]) -> Option<usize> {
         // todo: extract pos from sig_dgsp
         // fixme: shouldn't check if the sig is valid or not?
         let mut pos: [u8; 16] = dgsp_pos.as_slice().try_into().unwrap();
         let block = GenericArray::from_mut_slice(&mut pos);
 
         // Initialize cipher
-        let cipher = Aes256::new(GenericArray::from_slice(msk));
+        let cipher = Aes256::new(GenericArray::from_slice(msk.as_ref()));
         cipher.decrypt_block(block);
 
         let id: usize = bytes_to_usize(&pos[8..]);
@@ -169,14 +202,14 @@ impl DGSPManager {
         None
     }
 
-    fn calculate_cid(msk: &[u8; DGSP_N], id: usize) -> [u8; DGSP_N] {
+    fn calculate_cid(msk: &DGSPMSK, id: usize) -> [u8; DGSP_N] {
         let mut hasher = DgspHasher::hasher();
-        hasher.update(msk);
+        hasher.update(msk.as_ref());
         hasher.update(usize_to_bytes(id));
         hasher.finalize().as_slice().try_into().unwrap()
     }
 
-    fn is_req_valid(msk: &[u8; DGSP_N], id: usize, cid: [u8; DGSP_N], plm: &[PLMEntry]) -> bool {
+    fn is_req_valid(msk: &DGSPMSK, id: usize, cid: &[u8; DGSP_N], plm: &[PLMEntry]) -> bool {
         // check if user exists
         if id >= plm.len() {
             return false;
@@ -186,13 +219,13 @@ impl DGSPManager {
             return false;
         }
         // check if user cid is correct
-        if cid != Self::calculate_cid(msk, id) {
+        if *cid != Self::calculate_cid(msk, id) {
             return false;
         }
         true
     }
 
-    fn par_dgsp_pos(msk: &[u8; DGSP_N], id: usize, ctr_id: u64, b: usize) -> Vec<[u8; 16]> {
+    fn par_dgsp_pos(msk: &DGSPMSK, id: usize, ctr_id: u64, b: usize) -> Vec<[u8; 16]> {
         // Perform parallel encryption
         (0..b)
             .into_par_iter()
@@ -204,7 +237,7 @@ impl DGSPManager {
                 block[8..].copy_from_slice(&u64_to_bytes(ctr_id + (i as u64)));
 
                 // Initialize AES-256 cipher
-                let cipher = Aes256::new(GenericArray::from_slice(msk));
+                let cipher = Aes256::new(GenericArray::from_slice(msk.as_ref()));
 
                 // Encrypt the block
                 let mut block_generic = GenericArray::from_mut_slice(&mut block);
@@ -237,10 +270,6 @@ impl DGSPManager {
     }
 }
 
-pub struct CSREntry {
-    wp_adrs_rand: [u8; 8],
-}
-
 #[derive(Default)]
 pub struct DGSPUser;
 
@@ -249,10 +278,17 @@ impl DGSPUser {
         DGSPUser
     }
 
+    pub fn keygen_user() -> ([u8; SPX_N], [u8; SPX_N]) {
+        let mut pk_seed_user: [u8; SPX_N] = [0; 16];
+        let mut sk_seed_user: [u8; SPX_N] = [0; 16];
+        OsRng.fill_bytes(&mut pk_seed_user);
+        OsRng.fill_bytes(&mut sk_seed_user);
+        (pk_seed_user, sk_seed_user)
+    }
+
     pub fn cert_sign_req(
-        &self,
-        sk_seed_user: &[u8; SPX_N],
         pub_seed_user: &[u8; SPX_N],
+        sk_seed_user: &[u8; SPX_N],
         b: usize,
     ) -> (Vec<[u8; SPX_WOTS_PK_BYTES]>, Vec<[u8; 8]>) {
         (0..b)
@@ -266,71 +302,134 @@ impl DGSPUser {
             .unzip()
     }
 
-    pub fn sign_with_pk(
-        &self,
+    pub fn sign(
         message: &[u8],
-        sk_seed_user: &[u8; SPX_N],
         pub_seed_user: &[u8; SPX_N],
+        sk_seed_user: &[u8; SPX_N],
         wots_adrs_rand: &[u8; 8],
         cert: ([u8; 16], SphincsPlusSignature),
-    ) -> ([u8; DGSP_BYTES], [u8; SPX_WOTS_BYTES]) {
+    ) -> DGSPSignature {
         let wp = WotsPlus::new_from_rand(wots_adrs_rand, pub_seed_user);
-        let (wots_sig, wots_pk) = wp.sign_and_pk(message, sk_seed_user);
-        let mut sig = [0u8; DGSP_BYTES];
-        sig[..SPX_WOTS_BYTES].copy_from_slice(&wots_sig);
-        sig[SPX_WOTS_BYTES..SPX_WOTS_BYTES + DGSP_POS_BYTES].copy_from_slice(&cert.0);
-        sig[SPX_WOTS_BYTES + DGSP_POS_BYTES..SPX_WOTS_BYTES + DGSP_POS_BYTES + SPX_BYTES]
-            .copy_from_slice(cert.1.as_ref());
-        sig[DGSP_BYTES - WTS_ADRS_RAND_BYTES..].copy_from_slice(&wp.adrs_rand);
-        (sig, wots_pk)
+        let (wots_sig, _) = wp.sign_and_pk(message, sk_seed_user);
+
+        DGSPSignature {
+            wots_sig,
+            pos: cert.0,
+            spx_sig: cert.1,
+            wots_adrs_rand: *wots_adrs_rand,
+        }
     }
 
+    // pub fn sign_and_pk(
+    //     message: &[u8],
+    //     pub_seed_user: &[u8; SPX_N],
+    //     sk_seed_user: &[u8; SPX_N],
+    //     wots_adrs_rand: &[u8; 8],
+    //     cert: ([u8; 16], SphincsPlusSignature),
+    // ) -> ([u8; DGSP_BYTES], [u8; SPX_WOTS_BYTES]) {
+    //     let wp = WotsPlus::new_from_rand(wots_adrs_rand, pub_seed_user);
+    //     let (wots_sig, wots_pk) = wp.sign_and_pk(message, sk_seed_user);
+    //     let mut sig = [0u8; DGSP_BYTES];
+    //     sig[..SPX_WOTS_BYTES].copy_from_slice(&wots_sig);
+    //     sig[SPX_WOTS_BYTES..SPX_WOTS_BYTES + DGSP_POS_BYTES].copy_from_slice(&cert.0);
+    //     sig[SPX_WOTS_BYTES + DGSP_POS_BYTES..SPX_WOTS_BYTES + DGSP_POS_BYTES + SPX_BYTES]
+    //         .copy_from_slice(cert.1.as_ref());
+    //     sig[DGSP_BYTES - WTS_ADRS_RAND_BYTES..].copy_from_slice(&wp.adrs_rand);
+    //     (sig, wots_pk)
+    // }
+
     pub fn verify(
-        &self,
         message: &[u8],
-        sig: &[u8; DGSP_BYTES],
+        sig: &DGSPSignature,
         wots_pk: &[u8; SPX_WOTS_BYTES],
         pub_seed_user: &[u8; SPX_N],
         revoked_list: &Vec<[u8; 16]>,
-        spx_pk: &[u8; SPX_PK_BYTES],
+        spx_pk: &SphincsPlusPublicKey,
     ) -> bool {
-        let mut wots_sig = [0u8; SPX_WOTS_BYTES];
-        let mut dgsp_pos = [0u8; DGSP_POS_BYTES];
-        let mut spx_sig = [0u8; SPX_BYTES];
-        let mut wots_adrs_rand = [0u8; WTS_ADRS_RAND_BYTES];
+        // let mut wots_sig = [0u8; SPX_WOTS_BYTES];
+        // let mut dgsp_pos = [0u8; DGSP_POS_BYTES];
+        // let mut spx_sig = [0u8; SPX_BYTES];
+        // let mut wots_adrs_rand = [0u8; WTS_ADRS_RAND_BYTES];
 
-        wots_sig.copy_from_slice(sig[..SPX_WOTS_BYTES].as_ref());
-        dgsp_pos.copy_from_slice(sig[SPX_WOTS_BYTES..SPX_WOTS_BYTES + DGSP_POS_BYTES].as_ref());
-        spx_sig.copy_from_slice(
-            sig[SPX_WOTS_BYTES + DGSP_POS_BYTES..SPX_WOTS_BYTES + DGSP_POS_BYTES + SPX_BYTES]
-                .as_ref(),
-        );
-        wots_adrs_rand.copy_from_slice(sig[DGSP_BYTES - WTS_ADRS_RAND_BYTES..].as_ref());
+        // wots_sig.copy_from_slice(sig[..SPX_WOTS_BYTES].as_ref());
+        // dgsp_pos.copy_from_slice(sig[SPX_WOTS_BYTES..SPX_WOTS_BYTES + DGSP_POS_BYTES].as_ref());
+        // spx_sig.copy_from_slice(
+        //     sig[SPX_WOTS_BYTES + DGSP_POS_BYTES..SPX_WOTS_BYTES + DGSP_POS_BYTES + SPX_BYTES]
+        //         .as_ref(),
+        // );
+        // wots_adrs_rand.copy_from_slice(sig[DGSP_BYTES - WTS_ADRS_RAND_BYTES..].as_ref());
 
-        if revoked_list.contains(&dgsp_pos) {
+        if revoked_list.contains(&sig.pos) {
             return false;
         }
 
-        let wp = WotsPlus::new_from_rand(&wots_adrs_rand, pub_seed_user);
+        let wp = WotsPlus::new_from_rand(&sig.wots_adrs_rand, pub_seed_user);
 
         // fixme: shouldn't we verify the wots sig as well like the below?
-        if !wp.verify(&wots_sig, message, wots_pk) {
+        if !wp.verify(&sig.wots_sig, message, wots_pk) {
             return false;
         }
 
-        let mut spx_msg = [0u8; SPX_WOTS_BYTES + DGSP_POS_BYTES];
-        spx_msg.copy_from_slice(sig[..SPX_WOTS_BYTES + DGSP_POS_BYTES].as_ref());
+        let mut spx_msg = [0u8; SPX_WOTS_PK_BYTES + DGSP_POS_BYTES];
+        spx_msg[..SPX_WOTS_PK_BYTES].copy_from_slice(wots_pk);
+        spx_msg[SPX_WOTS_PK_BYTES..].copy_from_slice(sig.pos.as_ref());
 
-        if SphincsPlus
-            .verify(
-                &spx_sig.as_ref().try_into().unwrap(),
-                &spx_msg,
-                &spx_pk.as_ref().try_into().unwrap(),
-            )
-            .is_err()
-        {
-            return false;
-        }
-        true
+        SphincsPlus.verify(&sig.spx_sig, &spx_msg, spx_pk).is_ok()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rand::prelude::*;
+
+    #[test]
+    fn test_dgsp() {
+        let mut plm: Vec<PLMEntry> = Vec::new();
+        let mut ctr_ids: Vec<u64> = Vec::new();
+
+        // Create manager
+        let (pk_m, sk_m, mut revoked_list) = DGSPManager::keygen();
+
+        // Create user u1 and join
+        let (pk_seed_u1, sk_seed_u1) = DGSPUser::keygen_user();
+        let username_u1 = "DGSP User 1";
+        let (id_u1, cid_u1) = DGSPManager::join(&sk_m.msk, username_u1, &mut plm, &mut ctr_ids);
+
+        // Create a batch of CSR
+        const B: usize = 10;
+        let (mut wots_pks, mut wots_adrs_rands) =
+            DGSPUser::cert_sign_req(&pk_seed_u1, &sk_seed_u1, B);
+
+        // Obtain certificates for the given csr batch
+        let mut certs = DGSPManager::req(
+            &sk_m.msk,
+            id_u1,
+            cid_u1,
+            &wots_pks,
+            &plm,
+            &sk_m.spx_sk,
+            &mut ctr_ids,
+        )
+        .unwrap();
+
+        // Sign a single message
+        let mut rng = thread_rng();
+        let len: u16 = rng.gen();
+        let message = (0..len).map(|_| rng.gen::<u8>()).collect::<Vec<_>>();
+        let wots_adrs_rand = wots_adrs_rands.pop().unwrap();
+        let wots_pk = wots_pks.pop().unwrap();
+        let cert = certs.pop().unwrap();
+        let wots_sig = DGSPUser::sign(&message, &pk_seed_u1, &sk_seed_u1, &wots_adrs_rand, cert);
+
+        // Verify the signature
+        assert!(DGSPUser::verify(
+            &message,
+            &wots_sig,
+            &wots_pk,
+            &pk_seed_u1,
+            &revoked_list,
+            &pk_m.spx_pk,
+        ));
     }
 }

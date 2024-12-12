@@ -145,7 +145,6 @@
 //! The macros and abstractions provided in this wrapper are also inspired by the need for usability in
 //! building complex cryptographic protocols, such as post-quantum group signature schemes.
 
-use crate::errors::SphincsError;
 use pqcrypto_traits::sign::{DetachedSignature, PublicKey, SecretKey};
 use zeroize::Zeroize;
 
@@ -179,6 +178,8 @@ use crate::sphincs_plus::params_sphincs_shake_256f::*;
 #[cfg(feature = "sphincs_shake_256s")]
 use crate::sphincs_plus::params_sphincs_shake_256s::*;
 
+use crate::array_struct;
+use crate::errors::Error;
 #[cfg(feature = "sphincs_sha2_128f")]
 use pqcrypto_sphincsplus::sphincssha2128fsimple::*;
 #[cfg(feature = "sphincs_sha2_128s")]
@@ -248,9 +249,9 @@ pub mod sha2_offsets;
 ))]
 pub mod shake_offsets;
 
-const CRYPTO_PUBLICKEYBYTES: usize = SPX_PK_BYTES;
-const CRYPTO_SECRETKEYBYTES: usize = SPX_SK_BYTES;
-const CRYPTO_BYTES: usize = SPX_BYTES;
+// pub const CRYPTO_PUBLICKEYBYTES: usize = SPX_PK_BYTES;
+// pub const CRYPTO_SECRETKEYBYTES: usize = SPX_SK_BYTES;
+// pub const CRYPTO_BYTES: usize = SPX_BYTES;
 // const CRYPTO_SEEDBYTES: usize = 3 * SPX_N;
 
 // #[derive(Copy, Clone, Default, Debug)]
@@ -259,93 +260,115 @@ const CRYPTO_BYTES: usize = SPX_BYTES;
 //     pub sk_seed: [u8; SPX_N],
 // }
 
-/// `SphincsPlusPublicKey` securely holds public-key for the SPHINCS+ signature scheme, using a
-/// `u8; CRYPTO_PUBLICKEYBYTES` internal field.
-/// This struct implements `Zeroize`, ensuring the data is wiped from memory when dropped (`#[zeroize(drop)]`).
-// Cloning is supported but should be done cautiously, as it duplicates sensitive information in memory.
-#[derive(Clone, Debug, Zeroize)]
-#[zeroize(drop)]
-#[cfg_attr(feature = "serialization", derive(Serialize, Deserialize))]
-pub struct SphincsPlusPublicKey(
-    #[cfg_attr(feature = "serialization", serde(with = "BigArray"))] [u8; CRYPTO_PUBLICKEYBYTES],
-);
+// /// `SphincsPlusPublicKey` securely holds public-key for the SPHINCS+ signature scheme, using a
+// /// `u8; CRYPTO_PUBLICKEYBYTES` internal field.
+// /// This struct implements `Zeroize`, ensuring the data is wiped from memory when dropped (`#[zeroize(drop)]`).
+// /// Cloning is supported but should be done cautiously, as it duplicates sensitive information in memory.
+// #[derive(Clone, Debug, Zeroize)]
+// #[zeroize(drop)]
+// #[cfg_attr(feature = "serialization", derive(Serialize, Deserialize))]
+// pub struct SphincsPlusPublicKey(
+//     #[cfg_attr(feature = "serialization", serde(with = "BigArray"))] [u8; SPX_PK_BYTES],
+// );
+//
+// impl AsRef<[u8]> for SphincsPlusPublicKey {
+//     fn as_ref(&self) -> &[u8] {
+//         &self.0
+//     }
+// }
+//
+// impl TryFrom<&[u8]> for SphincsPlusPublicKey {
+//     type Error = SphincsError;
+//     fn try_from(data: &[u8]) -> Result<Self, SphincsError> {
+//         if data.len() != SPX_PK_BYTES {
+//             Err(SphincsError::BadLength(SPX_PK_BYTES, data.len()))
+//         } else {
+//             let mut array = [0u8; SPX_PK_BYTES];
+//             array.copy_from_slice(data);
+//             Ok(Self(array))
+//         }
+//     }
+// }
+//
+// impl From<[u8; SPX_PK_BYTES]> for SphincsPlusPublicKey {
+//     fn from(value: [u8; SPX_PK_BYTES]) -> Self {
+//         Self(value)
+//     }
+// }
+//
+// /// `SphincsPlusSecretKey` securely holds public-key for the SPHINCS+ signature scheme, using a
+// /// `u8; CRYPTO_SECRETKEYBYTES` internal field.
+// /// This struct implements `Zeroize`, ensuring the data is wiped from memory when dropped (`#[zeroize(drop)]`).
+// #[derive(Clone, Debug, Zeroize)]
+// #[zeroize(drop)]
+// #[cfg_attr(feature = "serialization", derive(Serialize, Deserialize))]
+// pub struct SphincsPlusSecretKey(
+//     #[cfg_attr(feature = "serialization", serde(with = "BigArray"))] [u8; SPX_SK_BYTES],
+// );
+//
+// impl AsRef<[u8]> for SphincsPlusSecretKey {
+//     fn as_ref(&self) -> &[u8] {
+//         &self.0
+//     }
+// }
+//
+// impl TryFrom<&[u8]> for SphincsPlusSecretKey {
+//     type Error = SphincsError;
+//     fn try_from(data: &[u8]) -> Result<SphincsPlusSecretKey, SphincsError> {
+//         if data.len() != SPX_SK_BYTES {
+//             Err(SphincsError::BadLength(SPX_SK_BYTES, data.len()))
+//         } else {
+//             let mut array = [0u8; SPX_SK_BYTES];
+//             array.copy_from_slice(data);
+//             Ok(SphincsPlusSecretKey(array))
+//         }
+//     }
+// }
+//
+// impl From<[u8; SPX_SK_BYTES]> for SphincsPlusSecretKey {
+//     fn from(value: [u8; SPX_SK_BYTES]) -> Self {
+//         Self(value)
+//     }
+// }
+//
+// /// `SphincsPlusSignature` securely holds public-key for the SPHINCS+ signature scheme, using a
+// /// `u8; CRYPTO_BYTES` internal field.
+// /// This struct implements `Zeroize`, ensuring the data is wiped from memory when dropped (`#[zeroize(drop)]`).
+// #[derive(Clone, Debug, Zeroize)]
+// #[zeroize(drop)]
+// #[cfg_attr(feature = "serialization", derive(Serialize, Deserialize))]
+// pub struct SphincsPlusSignature(
+//     #[cfg_attr(feature = "serialization", serde(with = "BigArray"))] [u8; SPX_BYTES],
+// );
+//
+// impl AsRef<[u8]> for SphincsPlusSignature {
+//     fn as_ref(&self) -> &[u8] {
+//         &self.0
+//     }
+// }
+//
+// impl TryFrom<&[u8]> for SphincsPlusSignature {
+//     type Error = SphincsError;
+//     fn try_from(data: &[u8]) -> Result<SphincsPlusSignature, SphincsError> {
+//         if data.len() != SPX_BYTES {
+//             Err(SphincsError::BadLength(SPX_BYTES, data.len()))
+//         } else {
+//             let mut array = [0u8; SPX_BYTES];
+//             array.copy_from_slice(data);
+//             Ok(SphincsPlusSignature(array))
+//         }
+//     }
+// }
+//
+// impl From<[u8; SPX_BYTES]> for SphincsPlusSignature {
+//     fn from(value: [u8; SPX_BYTES]) -> Self {
+//         Self(value)
+//     }
+// }
 
-impl AsRef<[u8]> for SphincsPlusPublicKey {
-    fn as_ref(&self) -> &[u8] {
-        &self.0
-    }
-}
-
-impl TryFrom<&[u8]> for SphincsPlusPublicKey {
-    type Error = SphincsError;
-    fn try_from(data: &[u8]) -> Result<SphincsPlusPublicKey, SphincsError> {
-        if data.len() != CRYPTO_PUBLICKEYBYTES {
-            Err(SphincsError::BadLength(CRYPTO_PUBLICKEYBYTES, data.len()))
-        } else {
-            let mut array = [0u8; CRYPTO_PUBLICKEYBYTES];
-            array.copy_from_slice(data);
-            Ok(SphincsPlusPublicKey(array))
-        }
-    }
-}
-
-/// `SphincsPlusSecretKey` securely holds public-key for the SPHINCS+ signature scheme, using a
-/// `u8; CRYPTO_SECRETKEYBYTES` internal field.
-/// This struct implements `Zeroize`, ensuring the data is wiped from memory when dropped (`#[zeroize(drop)]`).
-#[derive(Clone, Debug, Zeroize)]
-#[zeroize(drop)]
-#[cfg_attr(feature = "serialization", derive(Serialize, Deserialize))]
-pub struct SphincsPlusSecretKey(
-    #[cfg_attr(feature = "serialization", serde(with = "BigArray"))] [u8; CRYPTO_SECRETKEYBYTES],
-);
-
-impl AsRef<[u8]> for SphincsPlusSecretKey {
-    fn as_ref(&self) -> &[u8] {
-        &self.0
-    }
-}
-
-impl TryFrom<&[u8]> for SphincsPlusSecretKey {
-    type Error = SphincsError;
-    fn try_from(data: &[u8]) -> Result<SphincsPlusSecretKey, SphincsError> {
-        if data.len() != CRYPTO_SECRETKEYBYTES {
-            Err(SphincsError::BadLength(CRYPTO_SECRETKEYBYTES, data.len()))
-        } else {
-            let mut array = [0u8; CRYPTO_SECRETKEYBYTES];
-            array.copy_from_slice(data);
-            Ok(SphincsPlusSecretKey(array))
-        }
-    }
-}
-
-/// `SphincsPlusSignature` securely holds public-key for the SPHINCS+ signature scheme, using a
-/// `u8; CRYPTO_BYTES` internal field.
-/// This struct implements `Zeroize`, ensuring the data is wiped from memory when dropped (`#[zeroize(drop)]`).
-#[derive(Clone, Debug, Zeroize)]
-#[zeroize(drop)]
-#[cfg_attr(feature = "serialization", derive(Serialize, Deserialize))]
-pub struct SphincsPlusSignature(
-    #[cfg_attr(feature = "serialization", serde(with = "BigArray"))] [u8; CRYPTO_BYTES],
-);
-
-impl AsRef<[u8]> for SphincsPlusSignature {
-    fn as_ref(&self) -> &[u8] {
-        &self.0
-    }
-}
-
-impl TryFrom<&[u8]> for SphincsPlusSignature {
-    type Error = SphincsError;
-    fn try_from(data: &[u8]) -> Result<SphincsPlusSignature, SphincsError> {
-        if data.len() != CRYPTO_BYTES {
-            Err(SphincsError::BadLength(CRYPTO_BYTES, data.len()))
-        } else {
-            let mut array = [0u8; CRYPTO_BYTES];
-            array.copy_from_slice(data);
-            Ok(SphincsPlusSignature(array))
-        }
-    }
-}
+array_struct!(SphincsPlusPublicKey, SPX_PK_BYTES);
+array_struct!(SphincsPlusSecretKey, SPX_SK_BYTES);
+array_struct!(SphincsPlusSignature, SPX_BYTES);
 
 /// `SphincsPlus` is a wrapper around the SPHINCS+ post-quantum signature scheme, providing an
 /// easy-to-use API for generating keypairs, signing messages, and verifying signatures. It supports
@@ -368,7 +391,7 @@ impl SphincsPlus {
     }
 
     /// Generate (pk, sk) keypair of SPHINCS+ for an instance of `SphincsPlus`.
-    pub fn keygen(&self) -> Result<(SphincsPlusPublicKey, SphincsPlusSecretKey), SphincsError> {
+    pub fn keygen(&self) -> Result<(SphincsPlusPublicKey, SphincsPlusSecretKey), Error> {
         let (pk, sk) = keypair();
         Ok((pk.as_bytes().try_into()?, sk.as_bytes().try_into()?))
     }
@@ -379,7 +402,7 @@ impl SphincsPlus {
         &self,
         message: &[u8],
         sk: &SphincsPlusSecretKey,
-    ) -> Result<SphincsPlusSignature, SphincsError> {
+    ) -> Result<SphincsPlusSignature, Error> {
         detached_sign(message, &SecretKey::from_bytes(sk.as_ref())?)
             .as_bytes()
             .try_into()
@@ -396,7 +419,7 @@ impl SphincsPlus {
         signature: &SphincsPlusSignature,
         message: &[u8],
         pk: &SphincsPlusPublicKey,
-    ) -> Result<(), SphincsError> {
+    ) -> Result<(), Error> {
         Ok(verify_detached_signature(
             &DetachedSignature::from_bytes(signature.as_ref())?,
             message,
@@ -433,7 +456,7 @@ mod tests {
 
         assert!(matches!(
             sp.verify(&fake_signature, &message, &pk),
-            Err(SphincsError::VerificationFailed(_))
+            Err(Error::SphincsPlusVerificationFailed(_))
         ));
         println!("SPHINCS+ wrapper keygen, signing, and verify tests passed.");
     }
