@@ -12,7 +12,7 @@ macro_rules! array_struct {
         /// Cloning is supported but should be done cautiously, as it duplicates sensitive
         /// information in memory.
         /// It also provide serialization via the `serialization` feature.
-        #[derive(Clone, Zeroize)]
+        #[derive(Clone, Debug, Zeroize)]
         #[cfg_attr(feature = "serialization", derive(Serialize, Deserialize))]
         pub struct $type(
             #[cfg_attr(feature = "serialization", serde(with = "BigArray"))] [u8; $size],
