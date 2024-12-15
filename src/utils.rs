@@ -6,7 +6,7 @@ use rand::RngCore;
 #[macro_export]
 macro_rules! array_struct {
     ($type: ident, $size: expr) => {
-        /// `$type` securely holds data, using a `u8; $size` internal field.
+        /// Securely holds data, using a `u8` array as an internal field.
         /// This struct implements `Zeroize`, ensuring the data is wiped from memory when dropped
         /// (`#[zeroize(drop)]`).
         /// Cloning is supported but should be done cautiously, as it duplicates sensitive

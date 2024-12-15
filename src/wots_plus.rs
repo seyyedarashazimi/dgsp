@@ -1,3 +1,31 @@
+//! # Winternitz One-Time Signature Scheme Plus (W-OTS+)
+//!
+//! This module implements the W-OTS+ scheme, a crucial part of DGSP hash-based group signature.
+//! W-OTS+ provides one-time signature functionality with efficient key generation, signing, and
+//! verification processes. It conforms to SPHINCS+ definition of W-OTS+.
+//!
+//! To incorporates `WOTS-T` safety principles to ensure the security of derived keys and
+//! signatures against multi-target, a proper [`Adrs`] is set per each keypair and generated
+//! signature. The `Adrs` contains a 64-bit random value, which alongside the random seeds, makes
+//! the scheme secure.
+//!
+//! ## W-OTS+ and DGSP
+//!
+//! This implementation supports DGSP parameter sets for SHA2 and SHAKE hash functions, which are
+//! derived by the choice of the parameters of SPHINCS+ scheme.
+//! The associated parameter sets and hasher variants are selected at compile time using feature
+//! flags.
+//!
+//! ## Important
+//!
+//! This W-OTS+ implementation is provided to be used in a bigger signature scheme like DGSP and
+//! optimized for that use. Therefore, it is not suggested to be used as an standalone signature
+//! scheme.
+//!
+//! ## Tests
+//!
+//! Comprehensive tests are provided to validate key generation, signing, verification, and consistency of derived public keys.
+
 use crate::utils::u64_to_bytes;
 use crate::wots_plus::adrs::Adrs;
 use crate::wots_plus::adrs::AdrsType::{WotsHash, WotsPk, WotsPrf};
@@ -35,7 +63,7 @@ use crate::sphincs_plus::params_sphincs_shake_256s::*;
     feature = "sphincs_sha2_256f",
     feature = "sphincs_sha2_256s",
 ))]
-use crate::hash::sha2::DgspHasher;
+use crate::hash::sha2::DGSPHasher;
 
 #[cfg(any(
     feature = "sphincs_shake_128f",
@@ -45,52 +73,48 @@ use crate::hash::sha2::DgspHasher;
     feature = "sphincs_shake_256f",
     feature = "sphincs_shake_256s",
 ))]
-use crate::hash::shake::DgspHasher;
+use crate::hash::shake::DGSPHasher;
 
 pub mod adrs;
 
+/// Length of random bytes used for address derivation in W-OTS+ operations.
 pub const WTS_ADRS_RAND_BYTES: usize = 8;
 
+/// Encapsulates the W-OTS+ operations and maintains state for the hasher and address randomness.
+/// It
 #[derive(Clone, Debug)]
 pub struct WotsPlus {
-    pub adrs_rand: [u8; 8],
-    hasher: DgspHasher,
+    pub adrs_rand: [u8; WTS_ADRS_RAND_BYTES],
+    hasher: DGSPHasher,
 }
 
 impl WotsPlus {
     pub fn new(pub_seed: &[u8; SPX_N]) -> Self {
-        let hasher = DgspHasher::new(pub_seed);
+        let hasher = DGSPHasher::new(pub_seed);
         Self {
-            adrs_rand: [0_u8; 8],
+            adrs_rand: [0_u8; WTS_ADRS_RAND_BYTES],
             hasher,
         }
     }
 
     pub fn new_from_rand(adrs_rand: &[u8], pub_seed: &[u8; SPX_N]) -> Self {
-        let hasher = DgspHasher::new(pub_seed);
+        let hasher = DGSPHasher::new(pub_seed);
         Self {
             adrs_rand: adrs_rand.try_into().unwrap(),
             hasher,
         }
     }
 
+    /// Generate private and public keys.
     pub fn keygen(&self, sk_seed: &[u8]) -> ([u8; SPX_WOTS_BYTES], [u8; SPX_WOTS_BYTES]) {
         let mut adrs = Adrs::new_full_from_rand(WotsHash, &self.adrs_rand);
-        self.wots_gen_pk_sk(sk_seed, 0, &mut adrs)
+        self.gen_pk_sk(sk_seed, 0, &mut adrs)
     }
 
+    /// Sign a message with a private key.
     pub fn sign(&self, message: &[u8], sk: &[u8]) -> [u8; SPX_WOTS_BYTES] {
         let mut adrs = Adrs::new_full_from_rand(WotsHash, &self.adrs_rand);
-        self.wots_gen_sig(sk, 0, &mut adrs, message)
-    }
-
-    pub fn sign_and_pk(
-        &self,
-        message: &[u8],
-        sk_seed: &[u8; SPX_N],
-    ) -> ([u8; SPX_WOTS_BYTES], [u8; SPX_WOTS_BYTES]) {
-        let mut adrs = Adrs::new_full_from_rand(WotsPrf, &self.adrs_rand);
-        self.gen_sig_and_pk_from_sk_seed(sk_seed, 0, &mut adrs, message)
+        self.gen_sig(sk, 0, &mut adrs, message)
     }
 
     pub fn sign_from_sk_seed(&self, message: &[u8], sk_seed: &[u8; SPX_N]) -> [u8; SPX_WOTS_BYTES] {
@@ -98,6 +122,7 @@ impl WotsPlus {
         self.gen_sig_from_sk_seed(sk_seed, 0, &mut adrs, message)
     }
 
+    /// Verify a signature.
     pub fn verify(&self, signature: &[u8], message: &[u8], pk: &[u8]) -> bool {
         let mut adrs = Adrs::new_full_from_rand(WotsHash, &self.adrs_rand);
         let calculated_pk = self.wots_pk_from_sig(signature, message, 0, &mut adrs);
@@ -107,6 +132,7 @@ impl WotsPlus {
         true
     }
 
+    /// Compute the public key from a signature and message.
     pub fn pk_from_sig(&self, signature: &[u8], message: &[u8]) -> [u8; SPX_WOTS_PK_BYTES] {
         let mut adrs = Adrs::new_full_from_rand(WotsHash, &self.adrs_rand);
         self.wots_pk_from_sig(signature, message, 0, &mut adrs)
@@ -223,7 +249,7 @@ impl WotsPlus {
         pk_buf
     }
 
-    fn wots_gen_pk_sk(
+    fn gen_pk_sk(
         &self,
         sk_seed: &[u8],
         leaf_idx: u32,
@@ -270,7 +296,7 @@ impl WotsPlus {
         (pk_buf, sk_buf)
     }
 
-    fn wots_gen_sig(
+    fn gen_sig(
         &self,
         sk: &[u8],
         leaf_idx: u32,
@@ -299,72 +325,6 @@ impl WotsPlus {
             );
         }
         sig_buf
-    }
-
-    fn gen_sig_and_pk_from_sk_seed(
-        &self,
-        sk_seed: &[u8],
-        leaf_idx: u32,
-        adrs: &mut Adrs,
-        message: &[u8],
-    ) -> ([u8; SPX_WOTS_BYTES], [u8; SPX_WOTS_BYTES]) {
-        let mut pk_buf = [0_u8; SPX_WOTS_BYTES];
-        let mut sk_buf = [0_u8; SPX_WOTS_BYTES];
-        let mut sig_buf = [0_u8; SPX_WOTS_BYTES];
-        let mut buf_index: usize;
-
-        // Calculate chain steps for the given message
-        let mut steps = [0_u32; SPX_WOTS_LEN];
-        Self::chain_lengths(steps.as_mut(), message);
-
-        let mut pk_adrs = *adrs;
-        let mut sk_adrs = *adrs;
-        sk_adrs.set_type(WotsPrf);
-        sk_adrs.set_keypair_addr(leaf_idx);
-
-        for i in 0..SPX_WOTS_LEN {
-            buf_index = i * SPX_N;
-
-            // Start with the secret seed
-            sk_adrs.set_chain_addr(i as u32);
-            sk_adrs.set_hash_addr(0_u32);
-            sk_adrs.set_type(WotsPrf);
-            self.hasher.spx_prf(
-                sk_buf[buf_index..buf_index + SPX_N].as_mut(),
-                sk_seed,
-                &sk_adrs,
-            );
-
-            pk_buf[buf_index..buf_index + SPX_N]
-                .copy_from_slice(sk_buf[buf_index..buf_index + SPX_N].as_ref());
-
-            sk_adrs.set_type(WotsHash);
-            for j in 0.. {
-                if j == steps[i] as usize {
-                    sig_buf[buf_index..buf_index + SPX_N]
-                        .copy_from_slice(pk_buf[buf_index..buf_index + SPX_N].as_ref());
-                }
-
-                if j == SPX_WOTS_W - 1 {
-                    break;
-                }
-
-                sk_adrs.set_hash_addr(j as u32);
-                self.hasher.spx_f_inplace(
-                    pk_buf[buf_index..buf_index + SPX_N].as_mut(),
-                    1,
-                    &sk_adrs,
-                );
-            }
-        }
-
-        pk_adrs.set_type(WotsPk);
-        pk_adrs.set_keypair_addr(leaf_idx);
-        // Do the final thash to generate the public keys
-        self.hasher
-            .spx_t_l_inplace(pk_buf.as_mut(), SPX_WOTS_LEN, &pk_adrs);
-
-        (sig_buf, pk_buf)
     }
 
     fn gen_sig_from_sk_seed(
@@ -424,7 +384,7 @@ mod tests {
         OsRng.fill_bytes(&mut pub_seed);
         OsRng.fill_bytes(&mut sk_seed);
 
-        let mut wp = WotsPlus::new(&pub_seed);
+        let wp = WotsPlus::new(&pub_seed);
 
         let (pk, sk) = wp.keygen(&sk_seed);
 
@@ -441,7 +401,7 @@ mod tests {
 
         assert!(!wp.verify(&fake_signature, &message, &pk));
 
-        let mut wp_same = WotsPlus::new_from_rand(&wp.adrs_rand, &pub_seed);
+        let wp_same = WotsPlus::new_from_rand(&wp.adrs_rand, &pub_seed);
         let (pk_same, _) = wp_same.keygen(&sk_seed);
 
         assert_eq!(pk, pk_same);
@@ -450,7 +410,7 @@ mod tests {
 
         assert_eq!(sig_same, signature);
 
-        assert!(wp_same.verify(&sig_same, &message, &pk));
+        assert!(wp_same.verify(&sig_same, &message, &pk_same));
         assert_eq!(wp_same.pk_from_sig(&sig_same, &message), pk);
 
         println!("WOTS+ keygen, signing, and verify tests passed.");

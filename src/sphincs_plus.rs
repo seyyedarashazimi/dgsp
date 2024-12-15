@@ -442,7 +442,7 @@ mod tests {
         let (pk, sk) = kg.unwrap();
 
         let mut rng = thread_rng();
-        let len: u16 = rng.gen();
+        let len: u8 = rng.gen();
         let message = (0..len).map(|_| rng.gen::<u8>()).collect::<Vec<_>>();
 
         let signing = sp.sign(&message, &sk);

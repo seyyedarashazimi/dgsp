@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 #[cfg(feature = "sphincs_sha2_128f")]
 use crate::sphincs_plus::params_sphincs_sha2_128f::*;
 #[cfg(feature = "sphincs_sha2_128s")]
@@ -10,18 +11,20 @@ use crate::sphincs_plus::params_sphincs_sha2_192s::*;
 use crate::sphincs_plus::params_sphincs_sha2_256f::*;
 #[cfg(feature = "sphincs_sha2_256s")]
 use crate::sphincs_plus::params_sphincs_sha2_256s::*;
+
+use crate::params::{DGSP_N, DGSP_POS_BYTES, DGSP_USER_BYTES};
 use crate::sphincs_plus::sha2_offsets::*;
 use crate::wots_plus::adrs::Adrs;
 use sha2::{Digest, Sha256, Sha512};
 
 #[derive(Clone, Debug)]
-pub struct DgspHasher {
+pub struct DGSPHasher {
     pub pub_seed: [u8; SPX_N],
     sha256: Sha256,
     sha512: Sha512,
 }
 
-impl DgspHasher {
+impl DGSPHasher {
     pub fn new(pub_seed: &[u8; SPX_N]) -> Self {
         // block-pad and initialize sha256 and sha512 with pub_seed
         let mut block256 = [0_u8; SPX_SHA256_BLOCK_BYTES];
@@ -53,7 +56,7 @@ impl DgspHasher {
         output.copy_from_slice(hasher.finalize().as_slice());
     }
 
-    pub fn simple_hash(output: &mut [u8], input: &[u8], in_byte_len: usize) {
+    fn simple_hash(output: &mut [u8], input: &[u8], in_byte_len: usize) {
         #[cfg(any(feature = "sphincs_sha2_128f", feature = "sphincs_sha2_128s",))]
         Self::sha2_256(output, input, in_byte_len);
 
@@ -66,8 +69,52 @@ impl DgspHasher {
         Self::sha2_512(output, input, in_byte_len);
     }
 
-    pub fn hasher() -> Sha256 {
-        Sha256::default()
+    pub fn calc_cid(output: &mut [u8], msk: &[u8], id_bytes: &[u8]) {
+        let mut hasher = Sha256::default();
+        hasher.update(msk[..DGSP_N].as_ref());
+        hasher.update(id_bytes[..DGSP_USER_BYTES].as_ref());
+        output[..DGSP_N].copy_from_slice(&hasher.finalize()[..DGSP_N]);
+    }
+
+    // pub fn hasher() -> Sha256 {
+    //     Sha256::default()
+    // }
+
+    #[cfg(any(feature = "sphincs_sha2_128f", feature = "sphincs_sha2_128s",))]
+    pub fn hash_m(
+        output: &mut [u8],
+        spx_r: &[u8],
+        sgn_seed: &[u8],
+        dgsp_pos: &[u8],
+        message: &[u8],
+    ) {
+        let mut hasher = Sha256::default();
+        hasher.update(spx_r[..SPX_N].as_ref());
+        hasher.update(sgn_seed[..SPX_N].as_ref());
+        hasher.update(dgsp_pos[..DGSP_POS_BYTES].as_ref());
+        hasher.update(message);
+        output[..SPX_N].copy_from_slice(&hasher.finalize()[..SPX_N]);
+    }
+
+    #[cfg(any(
+        feature = "sphincs_sha2_192f",
+        feature = "sphincs_sha2_192s",
+        feature = "sphincs_sha2_256f",
+        feature = "sphincs_sha2_256s",
+    ))]
+    pub fn hash_m(
+        output: &mut [u8],
+        spx_r: &[u8],
+        sgn_seed: &[u8],
+        dgsp_pos: &[u8],
+        message: &[u8],
+    ) {
+        let mut hasher = Sha512::default();
+        hasher.update(spx_r[..SPX_N].as_ref());
+        hasher.update(sgn_seed[..SPX_N].as_ref());
+        hasher.update(dgsp_pos[..DGSP_POS_BYTES].as_ref());
+        hasher.update(message);
+        output[..SPX_N].copy_from_slice(&hasher.finalize()[..SPX_N]);
     }
 
     /// Takes an array of inblocks concatenated arrays of SPX_N bytes. outlen=SP_X

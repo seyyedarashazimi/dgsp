@@ -1,5 +1,3 @@
-#![allow(dead_code)]
-
 use crate::params::WOTSPLUS_ADRS_LAYER;
 use crate::utils::{get_byte_at, set_byte_at, set_u32_at, set_u64_at};
 use rand::rngs::OsRng;
@@ -25,7 +23,7 @@ use crate::sphincs_plus::sha2_offsets::*;
     feature = "sphincs_shake_256s",
 ))]
 use crate::sphincs_plus::shake_offsets::*;
-
+use crate::wots_plus::WTS_ADRS_RAND_BYTES;
 // layer in WOTS+ for user is SPX_D
 // tree_addr: choose a "secure" random 64-bit value
 
@@ -63,7 +61,7 @@ pub enum AdrsType {
 ///                     [`AdrsType::WotsHash`], [`AdrsType::WotsPk`], or [`AdrsType::WotsPRF`].
 ///                     Other types are still defined for [`AdrsType`] only to be compatible with
 ///                     ADRS defined in SPHINCS+ but will not be used here.
-/// * `key pair address`: TODO: it is currently 0 but needs to be changed
+/// * `key pair address`: a single byte, set to zero.
 /// * `chain address`:  a single byte, corresponding to each chain of WOTS+.
 /// * `hash address`:   a single byte, corresponding to each height in a chain in WOTS+.
 #[derive(Copy, Clone, Default, Debug)]
@@ -82,7 +80,7 @@ impl Adrs {
     /// is set inside it, the layer address is initialized with
     /// the constant [`WOTSPLUS_ADRS_LAYER`], and the type is set
     /// from the `adrs_type` input.
-    pub fn new_full(adrs_type: AdrsType) -> (Self, [u8; 8]) {
+    pub fn new_full(adrs_type: AdrsType) -> (Self, [u8; WTS_ADRS_RAND_BYTES]) {
         let mut adrs = Self([0; 32]);
         adrs.set_type(adrs_type);
         adrs.set_layer_addr(WOTSPLUS_ADRS_LAYER);
@@ -90,7 +88,13 @@ impl Adrs {
         (adrs, r)
     }
 
-    pub fn new_full_from_rand(adrs_type: AdrsType, r: &[u8; 8]) -> Self {
+    /// Returns an `adrs`, from the given 8-byte randomness `r`
+    /// which is set as the 64-bit tree address inside the `adrs`.
+    /// The `adrs` is an instance of [`Adrs`] where the random `r`
+    /// is set inside it, the layer address is initialized with
+    /// the constant [`WOTSPLUS_ADRS_LAYER`], and the type is set
+    /// from the `adrs_type` input.
+    pub fn new_full_from_rand(adrs_type: AdrsType, r: &[u8; WTS_ADRS_RAND_BYTES]) -> Self {
         let mut adrs = Self([0; 32]);
         adrs.set_type(adrs_type);
         adrs.set_layer_addr(WOTSPLUS_ADRS_LAYER);
@@ -110,24 +114,24 @@ impl Adrs {
         self.0[..SPX_SHA256_ADDR_BYTES].as_ref()
     }
 
-    fn set_rand(&mut self, rand: &[u8; 8]) {
+    fn set_rand(&mut self, rand: &[u8; WTS_ADRS_RAND_BYTES]) {
         self.set_tree_addr(u64::from_be_bytes(*rand))
     }
 
-    fn create_rand(&self) -> [u8; 8] {
-        let mut r: [u8; 8] = [0; 8];
+    fn create_rand(&self) -> [u8; WTS_ADRS_RAND_BYTES] {
+        let mut r: [u8; WTS_ADRS_RAND_BYTES] = [0; WTS_ADRS_RAND_BYTES];
         OsRng.fill_bytes(&mut r);
         r
     }
 
-    fn assign_rand(&mut self) -> [u8; 8] {
+    fn assign_rand(&mut self) -> [u8; WTS_ADRS_RAND_BYTES] {
         let r = self.create_rand();
         self.set_rand(&r);
         r
     }
 
-    pub fn get_rand(&self) -> [u8; 8] {
-        self.0[SPX_OFFSET_TREE..SPX_OFFSET_TREE + 8]
+    pub fn get_rand(&self) -> [u8; WTS_ADRS_RAND_BYTES] {
+        self.0[SPX_OFFSET_TREE..SPX_OFFSET_TREE + WTS_ADRS_RAND_BYTES]
             .try_into()
             .unwrap()
     }

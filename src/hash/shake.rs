@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+use crate::params::{DGSP_N, DGSP_POS_BYTES, DGSP_USER_BYTES};
 use crate::utils::{bytes_to_u32, bytes_to_u64};
 use crate::wots_plus::adrs::Adrs;
 use sha3::{
@@ -19,13 +21,15 @@ use crate::sphincs_plus::params_sphincs_shake_256f::*;
 use crate::sphincs_plus::params_sphincs_shake_256s::*;
 
 #[derive(Clone, Debug)]
-pub(crate) struct DgspHasher {
+pub(crate) struct DGSPHasher {
     pub pub_seed: [u8; SPX_N],
 }
 
-impl DgspHasher {
-    pub(crate) fn new(pub_seed: [u8; SPX_N]) -> Self {
-        Self { pub_seed }
+impl DGSPHasher {
+    pub(crate) fn new(pub_seed: &[u8; SPX_N]) -> Self {
+        Self {
+            pub_seed: pub_seed.as_ref().try_into().unwrap(),
+        }
     }
     pub(crate) fn shake256(output: &mut [u8], input: &[u8]) {
         let mut hasher = Shake256::default();
@@ -34,12 +38,36 @@ impl DgspHasher {
         reader.read(output);
     }
 
+    pub fn calc_cid(output: &mut [u8], msk: &[u8], id_bytes: &[u8]) {
+        let mut hasher = Shake256::default();
+        hasher.update(msk[..DGSP_N].as_ref());
+        hasher.update(id_bytes[..DGSP_USER_BYTES].as_ref());
+        let mut reader = hasher.finalize_xof();
+        reader.read(output[..DGSP_N].as_mut());
+    }
+
+    pub fn hash_m(
+        output: &mut [u8],
+        spx_r: &[u8],
+        sgn_seed: &[u8],
+        dgsp_pos: &[u8],
+        message: &[u8],
+    ) {
+        let mut hasher = Shake256::default();
+        hasher.update(spx_r[..SPX_N].as_ref());
+        hasher.update(sgn_seed[..SPX_N].as_ref());
+        hasher.update(dgsp_pos[..DGSP_POS_BYTES].as_ref());
+        hasher.update(message);
+        let mut reader = hasher.finalize_xof();
+        reader.read(output[..SPX_N].as_mut());
+    }
+
     /// Computes the message hash using R, the public key, and the message.
     /// Outputs the message digest and the index of the leaf. The index is split in
     /// the tree index and the leaf index, for convenient copying to an address.
     ///
     /// H_msg(R, PK.seed, PK.root, M ) = SHAKE256(R||PK.seed||PK.root||M, 8m),
-    pub fn h_msg(
+    pub fn spx_h_msg(
         digest: &mut [u8],
         tree: &mut [u64],
         leaf_idx: &mut [u32],
