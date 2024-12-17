@@ -45,9 +45,3 @@ impl From<pqcrypto_traits::sign::VerificationError> for VerificationError {
         VerificationError::SphincsPlusVerificationFailed(e.to_string())
     }
 }
-
-impl From<pqcrypto_traits::sign::VerificationError> for Error {
-    fn from(e: pqcrypto_traits::sign::VerificationError) -> Self {
-        e.into()
-    }
-}

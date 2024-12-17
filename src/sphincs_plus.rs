@@ -179,7 +179,7 @@ use crate::sphincs_plus::params_sphincs_shake_256f::*;
 use crate::sphincs_plus::params_sphincs_shake_256s::*;
 
 use crate::array_struct;
-use crate::error::Error;
+use crate::error::{Error, VerificationError};
 #[cfg(feature = "sphincs_sha2_128f")]
 use pqcrypto_sphincsplus::sphincssha2128fsimple::*;
 #[cfg(feature = "sphincs_sha2_128s")]
@@ -424,7 +424,8 @@ impl SphincsPlus {
             &DetachedSignature::from_bytes(signature.as_ref())?,
             message,
             &PublicKey::from_bytes(pk.as_ref())?,
-        )?)
+        )
+        .map_err(|e| VerificationError::SphincsPlusVerificationFailed(e.to_string()))?)
     }
 }
 

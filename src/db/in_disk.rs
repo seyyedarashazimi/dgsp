@@ -6,8 +6,8 @@ use std::path::Path;
 const DGSP_POS_BYTES: usize = 16;
 
 impl From<sled::Error> for crate::error::Error {
-    fn from(value: sled::Error) -> Self {
-        Self::DbInternalError(format!("sled error: {}", value))
+    fn from(e: sled::Error) -> Self {
+        Self::DbInternalError(format!("sled error: {}", e))
     }
 }
 
@@ -15,8 +15,8 @@ impl<E> From<sled::transaction::TransactionError<E>> for crate::error::Error
 where
     E: ToString,
 {
-    fn from(value: sled::transaction::TransactionError<E>) -> Self {
-        match value {
+    fn from(e: sled::transaction::TransactionError<E>) -> Self {
+        match e {
             sled::transaction::TransactionError::Storage(err) => err.into(), // Handle storage errors
             sled::transaction::TransactionError::Abort(reason) => {
                 let message = reason.to_string();
