@@ -179,7 +179,7 @@ use crate::sphincs_plus::params_sphincs_shake_256f::*;
 use crate::sphincs_plus::params_sphincs_shake_256s::*;
 
 use crate::array_struct;
-use crate::errors::Error;
+use crate::error::Error;
 #[cfg(feature = "sphincs_sha2_128f")]
 use pqcrypto_sphincsplus::sphincssha2128fsimple::*;
 #[cfg(feature = "sphincs_sha2_128s")]
@@ -456,7 +456,7 @@ mod tests {
 
         assert!(matches!(
             sp.verify(&fake_signature, &message, &pk),
-            Err(Error::SphincsPlusVerificationFailed(_))
+            Err(Error::VerificationFailed(_))
         ));
         println!("SPHINCS+ wrapper keygen, signing, and verify tests passed.");
     }

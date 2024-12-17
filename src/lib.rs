@@ -1,5 +1,6 @@
+pub mod db;
 pub mod dgsp;
-pub mod errors;
+pub mod error;
 pub mod hash;
 pub mod params;
 pub mod sphincs_plus;

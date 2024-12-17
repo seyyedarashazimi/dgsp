@@ -17,8 +17,15 @@ serde = { version = "1.0", features = ["derive"], optional = true }
 serde-big-array = { version = "0.5.1", optional = true }
 sha2 = { version = "0.10.8", optional = true }
 sha3 = { version = "0.10.8", optional = true }
+sled = { version = "0.34", optional = true }
 
 [features]
+in-disk = ["sled"]
+in-memory = []
+serialization = [
+    "serde",
+    "serde-big-array",
+]
 sphincs_sha2_128f = ["sha2"]
 sphincs_sha2_128s = ["sha2"]
 sphincs_sha2_192f = ["sha2"]
@@ -31,9 +38,5 @@ sphincs_shake_192f = ["sha3"]
 sphincs_shake_192s = ["sha3"]
 sphincs_shake_256f = ["sha3"]
 sphincs_shake_256s = ["sha3"]
-serialization = [
-    "serde",
-    "serde-big-array",
-]
 
-default = ["sphincs_sha2_128f"]
+default = ["sphincs_sha2_128f", "serialization", "in-memory"]
