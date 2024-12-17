@@ -31,7 +31,7 @@ pub const DGSP_N: usize = DGSP_LAMBDA / 8;
 
 /// Layer address set in ADRS. It is chosen to be unique from the layer addresses present
 /// in SPHINCS+. Therefore, any value bigger than or equal to 22 is acceptable, but once
-/// set, it should not be changed for consistency.
+/// set, it should not be changed for consistency. max = 255.
 pub const WOTSPLUS_ADRS_LAYER: u32 = 73;
 
 // pub const DGSP_BYTES: usize =

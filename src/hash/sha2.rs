@@ -13,7 +13,7 @@ use crate::sphincs_plus::params_sphincs_sha2_256f::*;
 use crate::sphincs_plus::params_sphincs_sha2_256s::*;
 
 use crate::params::{DGSP_N, DGSP_POS_BYTES, DGSP_USER_BYTES};
-use crate::sphincs_plus::sha2_offsets::*;
+use crate::sphincs_plus::sha2_offsets::{SPX_SHA256_BLOCK_BYTES, SPX_SHA512_BLOCK_BYTES};
 use crate::wots_plus::adrs::Adrs;
 use sha2::{Digest, Sha256, Sha512};
 
@@ -70,7 +70,16 @@ impl DGSPHasher {
     }
 
     pub fn calc_cid(output: &mut [u8], msk: &[u8], id_bytes: &[u8]) {
+        #[cfg(any(feature = "sphincs_sha2_128f", feature = "sphincs_sha2_128s",))]
         let mut hasher = Sha256::default();
+        #[cfg(any(
+            feature = "sphincs_sha2_192f",
+            feature = "sphincs_sha2_192s",
+            feature = "sphincs_sha2_256f",
+            feature = "sphincs_sha2_256s",
+        ))]
+        let mut hasher = Sha512::default();
+
         hasher.update(msk[..DGSP_N].as_ref());
         hasher.update(id_bytes[..DGSP_USER_BYTES].as_ref());
         output[..DGSP_N].copy_from_slice(&hasher.finalize()[..DGSP_N]);

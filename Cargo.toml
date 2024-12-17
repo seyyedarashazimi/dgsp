@@ -39,4 +39,4 @@ sphincs_shake_192s = ["sha3"]
 sphincs_shake_256f = ["sha3"]
 sphincs_shake_256s = ["sha3"]
 
-default = ["sphincs_sha2_128f", "serialization", "in-memory"]
+default = ["sphincs_sha2_256s", "serialization", "in-memory"]

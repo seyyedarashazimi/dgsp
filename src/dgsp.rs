@@ -67,6 +67,7 @@ use serde::{Deserialize, Serialize};
 #[cfg(feature = "serialization")]
 use serde_big_array::BigArray;
 
+/// wots_sgn_seed is pk_seed of W-OTS+
 #[derive(Clone, Zeroize)]
 pub struct DGSPWotsRand {
     wots_adrs_rand: [u8; WTS_ADRS_RAND_BYTES],
@@ -120,7 +121,7 @@ impl DGSP {
     pub fn keygen_manager(
     ) -> Result<(DGSPManagerPublicKey, DGSPManagerSecretKey, RevokedList), Error> {
         let sp = SphincsPlus;
-        let (spx_pk, spx_sk) = sp.keygen().expect("failed to run SPHINCS+ keygen");
+        let (spx_pk, spx_sk) = sp.keygen()?;
         let mut msk = DGSPMSK::from([0u8; DGSP_N]);
         OsRng.fill_bytes(&mut msk.0);
 
@@ -378,6 +379,7 @@ mod tests {
         // Create user u1 and join
         let seed_u1 = DGSP::keygen_user();
         let username_u1 = random_str(10);
+        // let username_u1 = "0";
         let (id_u1, cid_u1) = DGSP::join(&sk_m.msk, username_u1.as_str(), &mut plm).unwrap();
 
         // Create a batch of CSR
@@ -395,9 +397,9 @@ mod tests {
 
         let wots_rand = wots_rands.pop().unwrap();
         let cert = certs.pop().unwrap();
-        let wots_sig = DGSP::sign(&message, &wots_rand, &seed_u1, cert);
+        let sig = DGSP::sign(&message, &wots_rand, &seed_u1, cert);
 
         // Verify the signature
-        DGSP::verify(&message, &wots_sig, &revoked_list, &pk_m).unwrap();
+        DGSP::verify(&message, &sig, &revoked_list, &pk_m).unwrap();
     }
 }
