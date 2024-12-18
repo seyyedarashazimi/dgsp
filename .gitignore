@@ -4,3 +4,4 @@
 
 Cargo.lock
 /database
+/test_db

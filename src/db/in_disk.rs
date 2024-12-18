@@ -1,9 +1,8 @@
+use crate::params::DGSP_POS_BYTES;
 use crate::utils::{bytes_to_u64, u64_to_bytes};
 use serde::{Deserialize, Serialize};
 use sled::Transactional;
 use std::path::Path;
-
-const DGSP_POS_BYTES: usize = 16;
 
 impl From<sled::Error> for crate::error::Error {
     fn from(e: sled::Error) -> Self {
@@ -28,8 +27,12 @@ where
                         }
                     }
                 }
-                if message == "UsernameAlreadyExists" {
-                    return crate::error::Error::UsernameAlreadyExists(message);
+                if message.starts_with("UsernameAlreadyExists:") {
+                    // Try to parse the number from the message
+                    if let Some(str) = message.strip_prefix("UsernameAlreadyExists:") {
+                        let username = str.trim().parse::<String>().unwrap();
+                        return crate::error::Error::UsernameAlreadyExists(username);
+                    }
                 }
                 sled::Error::Unsupported(reason.to_string()).into()
             },
@@ -55,8 +58,11 @@ const NEXT_ID_KEY: &[u8] = b"__next_id";
 impl PLM {
     /// Open or create the PLM database with required trees.
     pub fn open() -> Result<Self, crate::error::Error> {
-        let base_dir = Path::new("database");
-        let db = sled::open(base_dir.join("plm"))?;
+        Self::open_with_path("database")
+    }
+
+    pub fn open_with_path<P: AsRef<Path>>(path: P) -> Result<Self, crate::error::Error> {
+        let db = sled::open(path.as_ref().join("plm"))?;
         let plme_tree = db.open_tree("plme_tree")?;
         let name_tree = db.open_tree("name_tree")?;
         let meta_tree = db.open_tree("meta_tree")?;
@@ -72,12 +78,11 @@ impl PLM {
     ///
     /// Returns `Ok(id)` if newly added. Otherwise, throws an `crate::errors::Error` error if given
     /// username already existed, or if an error occurs.
-    pub fn add_new_user(&mut self, username: &str) -> Result<u64, crate::error::Error> {
-        self._add_new_user(username)
-    }
-
-    fn _add_new_user(&self, username: &str) -> Result<u64, crate::error::Error> {
-        let username_bytes = username.as_bytes();
+    pub fn add_new_user<S>(&self, username: S) -> Result<u64, crate::error::Error>
+    where
+        S: AsRef<str> + std::fmt::Display,
+    {
+        let username_bytes = username.as_ref().as_bytes();
 
         let new_id = (&self.plme_tree, &self.name_tree, &self.meta_tree).transaction(
             |(ptree, ntree, mtree)| {
@@ -85,7 +90,7 @@ impl PLM {
                 if ntree.get(username_bytes)?.is_some() {
                     // User already exists
                     return Err(sled::transaction::ConflictableTransactionError::Abort(
-                        "UsernameAlreadyExists",
+                        format!("UsernameAlreadyExists:{}", username),
                     ));
                 }
 
@@ -94,9 +99,9 @@ impl PLM {
                     Some(id_bytes) => {
                         let mut arr = [0u8; 8];
                         arr.copy_from_slice(&id_bytes);
-                        if self.plme_tree.get(arr)?.is_some() {
+                        if ptree.get(arr)?.is_some() {
                             return Err(sled::transaction::ConflictableTransactionError::Abort(
-                                "ID is already in-use",
+                                "ID is already in-use".to_string(),
                             ));
                         }
                         bytes_to_u64(&arr)
@@ -109,7 +114,7 @@ impl PLM {
                 let entry = PLMEntry {
                     ctr_certs: 0,
                     is_active: true,
-                    username: username.to_owned(),
+                    username: username.to_string(),
                 };
                 let serialized = bincode::serialize(&entry)
                     .map_err(|_| sled::Error::Unsupported("Serialization error".into()))?;
@@ -120,7 +125,7 @@ impl PLM {
 
                 // Update the next user ID counter
                 let new_next_id = user_id + 1;
-                ptree.insert(NEXT_ID_KEY, &u64_to_bytes(new_next_id))?;
+                mtree.insert(NEXT_ID_KEY, &u64_to_bytes(new_next_id))?;
 
                 Ok(user_id)
             },
@@ -130,11 +135,7 @@ impl PLM {
     }
 
     /// Deactivate a user by ID
-    pub fn deactivate_id(&mut self, id: u64) -> Result<(), crate::error::Error> {
-        self._deactivate_id(id)
-    }
-
-    fn _deactivate_id(&self, id: u64) -> Result<(), crate::error::Error> {
+    pub fn deactivate_id(&self, id: u64) -> Result<(), crate::error::Error> {
         let id_key = u64_to_bytes(id);
         self.plme_tree.transaction(|ptree| {
             let val = ptree.get(id_key)?;
@@ -202,11 +203,7 @@ impl PLM {
     }
 
     /// Increment ctr_certs by `add`
-    pub fn increment_ctr_id_by(&mut self, id: u64, add: u64) -> Result<(), crate::error::Error> {
-        self._increment_ctr_id_by(id, add)
-    }
-
-    fn _increment_ctr_id_by(&self, id: u64, add: u64) -> Result<(), crate::error::Error> {
+    pub fn increment_ctr_id_by(&self, id: u64, add: u64) -> Result<(), crate::error::Error> {
         let id_key = u64_to_bytes(id);
         self.plme_tree.transaction(|ptree| {
             if let Some(val) = ptree.get(id_key)? {
@@ -241,8 +238,11 @@ pub struct RevokedList {
 
 impl RevokedList {
     pub fn open() -> Result<Self, crate::error::Error> {
-        let base_dir = Path::new("database");
-        let db = sled::open(base_dir.join("rl"))?;
+        Self::open_with_path("database")
+    }
+
+    pub fn open_with_path<P: AsRef<Path>>(path: P) -> Result<Self, crate::error::Error> {
+        let db = sled::open(path.as_ref().join("rl"))?;
         let tree = db.open_tree("revoked_list")?;
         Ok(Self { tree })
     }
@@ -251,37 +251,8 @@ impl RevokedList {
         Ok(self.tree.get(pos)?.is_some())
     }
 
-    pub fn insert(&mut self, pos: [u8; DGSP_POS_BYTES]) -> Result<(), crate::error::Error> {
-        self._insert(pos)
-    }
-
-    fn _insert(&self, pos: [u8; DGSP_POS_BYTES]) -> Result<(), crate::error::Error> {
+    pub fn insert(&self, pos: [u8; DGSP_POS_BYTES]) -> Result<(), crate::error::Error> {
         self.tree.insert(pos, &[])?;
         Ok(())
     }
 }
-
-// fn main() -> Result<(), sled::Error> {
-//     // Example usage:
-//     let db = sled::open("my_db")?;
-//     let plm = PLM::open(db.clone())?;
-//     let revoked_list = RevokedList::open(&db)?;
-//
-//     let (user_id, added) = plm.add_new_user("alice")?;
-//     println!("Added user 'alice': id={} added={}", user_id, added);
-//
-//     plm.increment_ctr_id_by(user_id, 10)?;
-//     let ctr = plm.get_ctr_id(user_id)?;
-//     println!("Counter for user_id {}: {}", user_id, ctr);
-//
-//     plm.deactivate_id(user_id)?;
-//     let active = plm.id_is_active(user_id)?;
-//     println!("Is user_id {} active?: {}", user_id, active);
-//
-//     let pos = [0u8; DGSP_POS_BYTES];
-//     revoked_list.insert(pos)?;
-//     let is_revoked = revoked_list.contains(&pos)?;
-//     println!("Is pos revoked?: {}", is_revoked);
-//
-//     Ok(())
-// }
