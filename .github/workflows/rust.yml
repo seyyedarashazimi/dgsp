@@ -29,13 +29,13 @@ jobs:
           sphincs_shake_256f,
           sphincs_shake_256s
         ]
-        storage: [in-disk, in-memory]
+        storage: [ in-disk, in-memory ]
 
     steps:
       - uses: actions/checkout@v4
 
       - name: Build
-        run: cargo build --features "${{ matrix.sphincs }} ${{ matrix.storage }}" --verbose
+        run: cargo build --no-default-features --features "${{ matrix.sphincs }} ${{ matrix.storage }}" --verbose
 
       - name: Run tests
-        run: cargo test --features "${{ matrix.sphincs }} ${{ matrix.storage }}" --verbose
+        run: cargo test --no-default-features --features "${{ matrix.sphincs }} ${{ matrix.storage }}" --verbose
