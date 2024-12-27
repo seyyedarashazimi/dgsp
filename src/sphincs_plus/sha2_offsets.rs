@@ -1,5 +1,3 @@
-#![allow(dead_code)]
-
 pub const SPX_SHA256_ADDR_BYTES: usize = 22;
 pub const SPX_SHA256_BLOCK_BYTES: usize = 64;
 pub const SPX_SHA256_OUTPUT_BYTES: usize = 32;

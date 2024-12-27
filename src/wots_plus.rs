@@ -26,54 +26,14 @@
 //!
 //! Comprehensive tests are provided to validate key generation, signing, verification, and consistency of derived public keys.
 
+use crate::hash::DGSPHasher;
+use crate::sphincs_plus::{
+    SPX_N, SPX_WOTS_BYTES, SPX_WOTS_LEN, SPX_WOTS_LEN1, SPX_WOTS_LEN2, SPX_WOTS_LOGW,
+    SPX_WOTS_PK_BYTES, SPX_WOTS_W,
+};
 use crate::utils::u64_to_bytes;
 use crate::wots_plus::adrs::Adrs;
 use crate::wots_plus::adrs::AdrsType::{WotsHash, WotsPk, WotsPrf};
-
-#[cfg(feature = "sphincs_sha2_128f")]
-use crate::sphincs_plus::params_sphincs_sha2_128f::*;
-#[cfg(feature = "sphincs_sha2_128s")]
-use crate::sphincs_plus::params_sphincs_sha2_128s::*;
-#[cfg(feature = "sphincs_sha2_192f")]
-use crate::sphincs_plus::params_sphincs_sha2_192f::*;
-#[cfg(feature = "sphincs_sha2_192s")]
-use crate::sphincs_plus::params_sphincs_sha2_192s::*;
-#[cfg(feature = "sphincs_sha2_256f")]
-use crate::sphincs_plus::params_sphincs_sha2_256f::*;
-#[cfg(feature = "sphincs_sha2_256s")]
-use crate::sphincs_plus::params_sphincs_sha2_256s::*;
-#[cfg(feature = "sphincs_shake_128f")]
-use crate::sphincs_plus::params_sphincs_shake_128f::*;
-#[cfg(feature = "sphincs_shake_128s")]
-use crate::sphincs_plus::params_sphincs_shake_128s::*;
-#[cfg(feature = "sphincs_shake_192f")]
-use crate::sphincs_plus::params_sphincs_shake_192f::*;
-#[cfg(feature = "sphincs_shake_192s")]
-use crate::sphincs_plus::params_sphincs_shake_192s::*;
-#[cfg(feature = "sphincs_shake_256f")]
-use crate::sphincs_plus::params_sphincs_shake_256f::*;
-#[cfg(feature = "sphincs_shake_256s")]
-use crate::sphincs_plus::params_sphincs_shake_256s::*;
-
-#[cfg(any(
-    feature = "sphincs_sha2_128f",
-    feature = "sphincs_sha2_128s",
-    feature = "sphincs_sha2_192f",
-    feature = "sphincs_sha2_192s",
-    feature = "sphincs_sha2_256f",
-    feature = "sphincs_sha2_256s",
-))]
-use crate::hash::sha2::DGSPHasher;
-
-#[cfg(any(
-    feature = "sphincs_shake_128f",
-    feature = "sphincs_shake_128s",
-    feature = "sphincs_shake_192f",
-    feature = "sphincs_shake_192s",
-    feature = "sphincs_shake_256f",
-    feature = "sphincs_shake_256s",
-))]
-use crate::hash::shake::DGSPHasher;
 
 pub mod adrs;
 

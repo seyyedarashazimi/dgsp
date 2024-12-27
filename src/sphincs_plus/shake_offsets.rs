@@ -1,5 +1,3 @@
-#![allow(dead_code)]
-
 pub const SPX_OFFSET_LAYER: usize = 3; /* The byte used to specify the Merkle tree layer */
 pub const SPX_OFFSET_TREE: usize = 8; /* The start of the 8 byte field used to specify the tree */
 pub const SPX_OFFSET_TYPE: usize = 19; /* The byte used to specify the hash type (reason) */

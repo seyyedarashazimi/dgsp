@@ -1,71 +1,26 @@
-use crate::array_struct;
-use crate::error::{Error, VerificationError};
+use crate::db::{PLMInterface, RevokedListInterface};
+use crate::hash::DGSPHasher;
 use crate::params::{DGSP_N, DGSP_POS_BYTES};
-use crate::sphincs_plus::{
-    SphincsPlus, SphincsPlusPublicKey, SphincsPlusSecretKey, SphincsPlusSignature,
-};
-use crate::utils::{bytes_to_u64, u64_to_bytes};
+use crate::sphincs_plus::*;
+use crate::utils::{array_struct, bytes_to_u64, u64_to_bytes};
 use crate::wots_plus::{WotsPlus, WTS_ADRS_RAND_BYTES};
+use crate::{Error, VerificationError};
 use aes::cipher::{generic_array::GenericArray, BlockDecrypt, BlockEncrypt, KeyInit};
 use aes::Aes256;
 use rand::rngs::OsRng;
 use rand::RngCore;
-use std::path::Path;
+use rayon::prelude::*;
 use zeroize::Zeroize;
-
-#[cfg(feature = "sphincs_sha2_128f")]
-use crate::sphincs_plus::params_sphincs_sha2_128f::*;
-#[cfg(feature = "sphincs_sha2_128s")]
-use crate::sphincs_plus::params_sphincs_sha2_128s::*;
-#[cfg(feature = "sphincs_sha2_192f")]
-use crate::sphincs_plus::params_sphincs_sha2_192f::*;
-#[cfg(feature = "sphincs_sha2_192s")]
-use crate::sphincs_plus::params_sphincs_sha2_192s::*;
-#[cfg(feature = "sphincs_sha2_256f")]
-use crate::sphincs_plus::params_sphincs_sha2_256f::*;
-#[cfg(feature = "sphincs_sha2_256s")]
-use crate::sphincs_plus::params_sphincs_sha2_256s::*;
-#[cfg(feature = "sphincs_shake_128f")]
-use crate::sphincs_plus::params_sphincs_shake_128f::*;
-#[cfg(feature = "sphincs_shake_128s")]
-use crate::sphincs_plus::params_sphincs_shake_128s::*;
-#[cfg(feature = "sphincs_shake_192f")]
-use crate::sphincs_plus::params_sphincs_shake_192f::*;
-#[cfg(feature = "sphincs_shake_192s")]
-use crate::sphincs_plus::params_sphincs_shake_192s::*;
-#[cfg(feature = "sphincs_shake_256f")]
-use crate::sphincs_plus::params_sphincs_shake_256f::*;
-#[cfg(feature = "sphincs_shake_256s")]
-use crate::sphincs_plus::params_sphincs_shake_256s::*;
-
-#[cfg(any(
-    feature = "sphincs_sha2_128f",
-    feature = "sphincs_sha2_128s",
-    feature = "sphincs_sha2_192f",
-    feature = "sphincs_sha2_192s",
-    feature = "sphincs_sha2_256f",
-    feature = "sphincs_sha2_256s",
-))]
-use crate::hash::sha2::DGSPHasher;
-#[cfg(any(
-    feature = "sphincs_shake_128f",
-    feature = "sphincs_shake_128s",
-    feature = "sphincs_shake_192f",
-    feature = "sphincs_shake_192s",
-    feature = "sphincs_shake_256f",
-    feature = "sphincs_shake_256s",
-))]
-use crate::hash::shake::DGSPHasher;
-
-#[cfg(feature = "in-disk")]
-use crate::db::in_disk::{RevokedList, PLM};
-#[cfg(feature = "in-memory")]
-use crate::db::in_memory::{RevokedList, PLM};
 
 #[cfg(feature = "serialization")]
 use serde::{Deserialize, Serialize};
 #[cfg(feature = "serialization")]
 use serde_big_array::BigArray;
+
+#[cfg(feature = "in-disk")]
+pub use crate::{InDiskPLM, InDiskRevokedList};
+#[cfg(feature = "in-memory")]
+pub use crate::{InMemoryPLM, InMemoryRevokedList};
 
 /// wots_sgn_seed is pk_seed of W-OTS+
 #[derive(Clone, Zeroize)]
@@ -118,9 +73,7 @@ pub struct DGSPSignature {
 pub struct DGSP;
 
 impl DGSP {
-    pub fn keygen_manager<P: AsRef<Path>>(
-        rl_path: P,
-    ) -> Result<(DGSPManagerPublicKey, DGSPManagerSecretKey, RevokedList), Error> {
+    pub fn keygen_manager() -> Result<(DGSPManagerPublicKey, DGSPManagerSecretKey), Error> {
         let sp = SphincsPlus;
         let (spx_pk, spx_sk) = sp.keygen()?;
         let mut msk = DGSPMSK::from([0u8; DGSP_N]);
@@ -129,32 +82,40 @@ impl DGSP {
         let sk = DGSPManagerSecretKey { msk, spx_sk };
         let pk = DGSPManagerPublicKey { spx_pk };
 
-        Ok((pk, sk, RevokedList::open_with_path(rl_path)?))
+        Ok((pk, sk))
     }
 
-    pub fn join(msk: &DGSPMSK, username: &str, plm: &PLM) -> Result<(u64, [u8; DGSP_N]), Error> {
-        let new_id = plm.add_new_user(username)?;
+    pub async fn join<P: PLMInterface>(
+        msk: &DGSPMSK,
+        username: &str,
+        plm: &P,
+    ) -> Result<(u64, [u8; DGSP_N]), Error> {
+        let new_id = plm.add_new_user(username).await?;
         let cid = Self::calculate_cid(msk, new_id);
         Ok((new_id, cid))
     }
 
-    pub fn req_cert(
+    pub async fn req_cert<P: PLMInterface>(
         msk: &DGSPMSK,
         id: u64,
         cid: [u8; DGSP_N],
         wotsplus_public_keys: &Vec<[u8; SPX_WOTS_PK_BYTES]>,
-        plm: &PLM,
+        plm: &P,
         sphincs_plus_secret_key: &SphincsPlusSecretKey,
     ) -> Result<Vec<([u8; DGSP_POS_BYTES], SphincsPlusSignature)>, Error> {
-        Self::req_validity(msk, id, &cid, plm)?;
+        Self::req_validity(msk, id, &cid, plm).await?;
+
         let certs: Vec<([u8; DGSP_POS_BYTES], SphincsPlusSignature)> = Self::generate_certificates(
             msk,
             id,
             wotsplus_public_keys,
-            plm.get_ctr_id(id)?,
+            plm.get_ctr_id(id).await?,
             sphincs_plus_secret_key,
         )?;
-        plm.increment_ctr_id_by(id, wotsplus_public_keys.len() as u64)?;
+
+        plm.increment_ctr_id_by(id, wotsplus_public_keys.len() as u64)
+            .await?;
+
         Ok(certs)
     }
 
@@ -169,7 +130,7 @@ impl DGSP {
         let cipher = Aes256::new(GenericArray::from_slice(msk.as_ref()));
 
         wotsplus_public_keys
-            .iter()
+            .par_iter()
             .enumerate()
             .map(|(i, wots_pk)| {
                 let mut pos = [0u8; DGSP_POS_BYTES];
@@ -196,25 +157,29 @@ impl DGSP {
             .collect::<Result<Vec<([u8; DGSP_POS_BYTES], SphincsPlusSignature)>, Error>>()
     }
 
-    pub fn revoke(
+    pub async fn revoke<P: PLMInterface, R: RevokedListInterface>(
         msk: &DGSPMSK,
-        plm: &PLM,
+        plm: &P,
         to_be_revoked: Vec<u64>,
-        revoked_list: &RevokedList,
+        revoked_list: &R,
     ) -> Result<(), Error> {
         for r in to_be_revoked {
-            if plm.id_exists(r)? && plm.id_is_active(r)? {
-                let pos_list = Self::par_dgsp_pos(msk, r, 0, plm.get_ctr_id(r)?);
+            if plm.id_exists(r).await? && plm.id_is_active(r).await? {
+                let pos_list = Self::par_dgsp_pos(msk, r, 0, plm.get_ctr_id(r).await?);
                 for pos in pos_list {
-                    revoked_list.insert(pos)?;
+                    revoked_list.insert(pos).await?;
                 }
-                plm.deactivate_id(r)?;
+                plm.deactivate_id(r).await?;
             }
         }
         Ok(())
     }
 
-    pub fn open(msk: &DGSPMSK, plm: &PLM, sig: &DGSPSignature) -> Result<(u64, String), Error> {
+    pub async fn open<P: PLMInterface>(
+        msk: &DGSPMSK,
+        plm: &P,
+        sig: &DGSPSignature,
+    ) -> Result<(u64, String), Error> {
         let mut pos = sig.pos;
         let block = GenericArray::from_mut_slice(&mut pos);
 
@@ -224,7 +189,7 @@ impl DGSP {
         cipher.decrypt_block(block);
 
         let id = bytes_to_u64(&pos[..8]);
-        Ok((id, plm.get_username(id)?))
+        Ok((id, plm.get_username(id).await?))
     }
 
     fn calculate_cid(msk: &DGSPMSK, id: u64) -> [u8; DGSP_N] {
@@ -233,9 +198,14 @@ impl DGSP {
         cid
     }
 
-    fn req_validity(msk: &DGSPMSK, id: u64, cid: &[u8; DGSP_N], plm: &PLM) -> Result<(), Error> {
+    async fn req_validity<P: PLMInterface>(
+        msk: &DGSPMSK,
+        id: u64,
+        cid: &[u8; DGSP_N],
+        plm: &P,
+    ) -> Result<(), Error> {
         // check if user exists and is active
-        if !plm.id_exists(id)? || !plm.id_is_active(id)? {
+        if !plm.id_exists(id).await? || !plm.id_is_active(id).await? {
             return Err(Error::InvalidCertReq);
         }
 
@@ -249,6 +219,7 @@ impl DGSP {
     fn par_dgsp_pos(msk: &DGSPMSK, id: u64, ctr_id: u64, b: u64) -> Vec<[u8; DGSP_POS_BYTES]> {
         // Perform parallel encryption
         (0..b)
+            .into_par_iter()
             .map(|i| {
                 let mut block = [0u8; DGSP_POS_BYTES];
 
@@ -279,6 +250,7 @@ impl DGSP {
         b: usize,
     ) -> (Vec<[u8; SPX_WOTS_PK_BYTES]>, Vec<DGSPWotsRand>) {
         (0..b)
+            .into_par_iter()
             .map(|_| {
                 let wots_rand = DGSPWotsRand::new();
                 let wp =
@@ -318,13 +290,13 @@ impl DGSP {
         }
     }
 
-    pub fn verify(
+    pub async fn verify<R: RevokedListInterface>(
         message: &[u8],
         sig: &DGSPSignature,
-        revoked_list: &RevokedList,
+        revoked_list: &R,
         pk: &DGSPManagerPublicKey,
     ) -> Result<(), Error> {
-        if revoked_list.contains(&sig.pos)? {
+        if revoked_list.contains(&sig.pos).await? {
             return Err(VerificationError::RevokedSignature)?;
         }
 
@@ -357,6 +329,11 @@ mod tests {
     use std::path::PathBuf;
     use tempfile::Builder;
 
+    #[cfg(feature = "in-disk")]
+    use crate::db::in_disk::{InDiskPLM, InDiskRevokedList};
+    #[cfg(feature = "in-memory")]
+    use crate::db::in_memory::{InMemoryPLM, InMemoryRevokedList};
+
     fn random_str(length: usize) -> String {
         thread_rng()
             .sample_iter(&Alphanumeric)
@@ -365,8 +342,9 @@ mod tests {
             .collect()
     }
 
-    #[test]
-    fn test_dgsp() {
+    #[tokio::test]
+    #[cfg(feature = "in-disk")]
+    async fn test_dgsp_in_disk() {
         // Create a temporary directory for test in the project root
         let project_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
         let temp_dir = Builder::new()
@@ -375,25 +353,32 @@ mod tests {
             .expect("Failed to create temporary directory in project root");
 
         // Create PL_M
-        let plm = PLM::open_with_path(temp_dir.path().join("dgsp")).unwrap();
+        let plm = InDiskPLM::open(temp_dir.path().join("dgsp")).await.unwrap();
+
+        // Create Revoked List:
+        let revoked_list = InDiskRevokedList::open(temp_dir.path().join("dgsp"))
+            .await
+            .unwrap();
 
         // Create manager keys
-        let (pk_m, sk_m, revoked_list) =
-            DGSP::keygen_manager(temp_dir.path().join("dgsp")).unwrap();
+        let (pk_m, sk_m) = DGSP::keygen_manager().unwrap();
 
         // Create user u1 and join
         let seed_u1 = DGSP::keygen_user();
         let username_u1 = random_str(10);
         // let username_u1 = "0";
-        let (id_u1, cid_u1) = DGSP::join(&sk_m.msk, username_u1.as_str(), &plm).unwrap();
+        let (id_u1, cid_u1) = DGSP::join(&sk_m.msk, username_u1.as_str(), &plm)
+            .await
+            .unwrap();
 
         // Create a batch of CSR
         const B: usize = 3;
         let (wots_pks, mut wots_rands) = DGSP::cert_sign_req_user(&seed_u1, B);
 
         // Obtain certificates for the given csr batch
-        let mut certs =
-            DGSP::req_cert(&sk_m.msk, id_u1, cid_u1, &wots_pks, &plm, &sk_m.spx_sk).unwrap();
+        let mut certs = DGSP::req_cert(&sk_m.msk, id_u1, cid_u1, &wots_pks, &plm, &sk_m.spx_sk)
+            .await
+            .unwrap();
 
         // Sign a single message
         let mut rng = thread_rng();
@@ -405,26 +390,133 @@ mod tests {
         let sig = DGSP::sign(&message, &wots_rand, &seed_u1, cert);
 
         // Verify the signature
-        DGSP::verify(&message, &sig, &revoked_list, &pk_m).unwrap();
+        DGSP::verify(&message, &sig, &revoked_list, &pk_m)
+            .await
+            .unwrap();
 
         // Obtain username and id from sig
         assert_eq!(
-            DGSP::open(&sk_m.msk, &plm, &sig).unwrap(),
+            DGSP::open(&sk_m.msk, &plm, &sig).await.unwrap(),
             (id_u1, username_u1)
         );
 
-        // Revoke a user and its certificated
-        DGSP::revoke(&sk_m.msk, &plm, vec![id_u1], &revoked_list).unwrap();
-        assert!(revoked_list.contains(&sig.pos).unwrap());
-        certs.iter().for_each(|cert| {
-            assert!(revoked_list.contains(&cert.0).unwrap());
-        });
+        // Revoke a user and its certificates
+        DGSP::revoke(&sk_m.msk, &plm, vec![id_u1], &revoked_list)
+            .await
+            .unwrap();
+        assert!(revoked_list.contains(&sig.pos).await.unwrap());
+
+        for cert in &certs {
+            assert!(revoked_list.contains(&cert.0).await.unwrap());
+        }
 
         // Make sure no cert will be created for that id from now on.
         let (wots_pks_new, _) = DGSP::cert_sign_req_user(&seed_u1, 1);
         assert_eq!(
-            DGSP::req_cert(&sk_m.msk, id_u1, cid_u1, &wots_pks_new, &plm, &sk_m.spx_sk),
+            DGSP::req_cert(&sk_m.msk, id_u1, cid_u1, &wots_pks_new, &plm, &sk_m.spx_sk).await,
             Err(Error::InvalidCertReq)
+        );
+
+        // Make sure no signatures created by the revoked user will verify
+        let wots_rand_new = wots_rands.pop().unwrap();
+        let cert_new = certs.pop().unwrap();
+        let message_new = (0..len).map(|_| rng.gen::<u8>()).collect::<Vec<_>>();
+        let sig_new = DGSP::sign(&message_new, &wots_rand_new, &seed_u1, cert_new);
+        assert_eq!(
+            DGSP::verify(&message_new, &sig_new, &revoked_list, &pk_m).await,
+            Err(Error::VerificationFailed(
+                VerificationError::RevokedSignature
+            ))
+        );
+    }
+
+    #[tokio::test]
+    #[cfg(feature = "in-memory")]
+    async fn test_dgsp_in_memory() {
+        // Create a temporary directory for test in the project root
+        let project_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        let temp_dir = Builder::new()
+            .prefix("temp_example_db_")
+            .tempdir_in(&project_root)
+            .expect("Failed to create temporary directory in project root");
+
+        // Create PL_M
+        let plm = InMemoryPLM::open(temp_dir.path().join("dgsp"))
+            .await
+            .unwrap();
+
+        // Create manager keys
+        let revoked_list = InMemoryRevokedList::open(temp_dir.path().join("dgsp"))
+            .await
+            .unwrap();
+
+        // Create manager keys
+        let (pk_m, sk_m) = DGSP::keygen_manager().unwrap();
+
+        // Create user u1 and join
+        let seed_u1 = DGSP::keygen_user();
+        let username_u1 = random_str(10);
+        // let username_u1 = "0";
+        let (id_u1, cid_u1) = DGSP::join(&sk_m.msk, username_u1.as_str(), &plm)
+            .await
+            .unwrap();
+
+        // Create a batch of CSR
+        const B: usize = 3;
+        let (wots_pks, mut wots_rands) = DGSP::cert_sign_req_user(&seed_u1, B);
+
+        // Obtain certificates for the given csr batch
+        let mut certs = DGSP::req_cert(&sk_m.msk, id_u1, cid_u1, &wots_pks, &plm, &sk_m.spx_sk)
+            .await
+            .unwrap();
+
+        // Sign a single message
+        let mut rng = thread_rng();
+        let len: u8 = rng.gen();
+        let message = (0..len).map(|_| rng.gen::<u8>()).collect::<Vec<_>>();
+
+        let wots_rand = wots_rands.pop().unwrap();
+        let cert = certs.pop().unwrap();
+        let sig = DGSP::sign(&message, &wots_rand, &seed_u1, cert);
+
+        // Verify the signature
+        DGSP::verify(&message, &sig, &revoked_list, &pk_m)
+            .await
+            .unwrap();
+
+        // Obtain username and id from sig
+        assert_eq!(
+            DGSP::open(&sk_m.msk, &plm, &sig).await.unwrap(),
+            (id_u1, username_u1)
+        );
+
+        // Revoke a user and its certificates
+        DGSP::revoke(&sk_m.msk, &plm, vec![id_u1], &revoked_list)
+            .await
+            .unwrap();
+        assert!(revoked_list.contains(&sig.pos).await.unwrap());
+
+        for cert in &certs {
+            assert!(revoked_list.contains(&cert.0).await.unwrap());
+        }
+
+        // Make sure no cert will be created for that id from now on.
+        let (wots_pks_new, _) = DGSP::cert_sign_req_user(&seed_u1, 1);
+        assert_eq!(
+            DGSP::req_cert(&sk_m.msk, id_u1, cid_u1, &wots_pks_new, &plm, &sk_m.spx_sk).await,
+            Err(Error::InvalidCertReq)
+        );
+
+        // Make sure no signatures created by the revoked user will verify
+        let wots_rand_new = wots_rands.pop().unwrap();
+        let cert_new = certs.pop().unwrap();
+        let message_new = (0..len).map(|_| rng.gen::<u8>()).collect::<Vec<_>>();
+        let sig_new = DGSP::sign(&message_new, &wots_rand_new, &seed_u1, cert_new);
+        assert_eq!(
+            DGSP::verify(&message_new, &sig_new, &revoked_list, &pk_m).await,
+            Err(Error::VerificationFailed(
+                VerificationError::RevokedSignature
+            ))
         );
     }
 }

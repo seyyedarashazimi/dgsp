@@ -5,7 +5,6 @@
 //!
 //! Note that these values are not open for configuration since they do not
 //! affect the underlying call to the PQClean's SPHINCS+ calls.
-#![allow(dead_code)]
 
 /// Hash output length in bytes.
 pub const SPX_N: usize = 16;

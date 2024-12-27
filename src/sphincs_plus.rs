@@ -145,6 +145,8 @@
 //! The macros and abstractions provided in this wrapper are also inspired by the need for usability in
 //! building complex cryptographic protocols, such as post-quantum group signature schemes.
 
+use crate::error::{Error, VerificationError};
+use crate::utils::array_struct;
 use pqcrypto_traits::sign::{DetachedSignature, PublicKey, SecretKey};
 use zeroize::Zeroize;
 
@@ -154,32 +156,30 @@ use serde::{Deserialize, Serialize};
 use serde_big_array::BigArray;
 
 #[cfg(feature = "sphincs_sha2_128f")]
-use crate::sphincs_plus::params_sphincs_sha2_128f::*;
+pub use crate::sphincs_plus::params_sphincs_sha2_128f::*;
 #[cfg(feature = "sphincs_sha2_128s")]
-use crate::sphincs_plus::params_sphincs_sha2_128s::*;
+pub use crate::sphincs_plus::params_sphincs_sha2_128s::*;
 #[cfg(feature = "sphincs_sha2_192f")]
-use crate::sphincs_plus::params_sphincs_sha2_192f::*;
+pub use crate::sphincs_plus::params_sphincs_sha2_192f::*;
 #[cfg(feature = "sphincs_sha2_192s")]
-use crate::sphincs_plus::params_sphincs_sha2_192s::*;
+pub use crate::sphincs_plus::params_sphincs_sha2_192s::*;
 #[cfg(feature = "sphincs_sha2_256f")]
-use crate::sphincs_plus::params_sphincs_sha2_256f::*;
+pub use crate::sphincs_plus::params_sphincs_sha2_256f::*;
 #[cfg(feature = "sphincs_sha2_256s")]
-use crate::sphincs_plus::params_sphincs_sha2_256s::*;
+pub use crate::sphincs_plus::params_sphincs_sha2_256s::*;
 #[cfg(feature = "sphincs_shake_128f")]
-use crate::sphincs_plus::params_sphincs_shake_128f::*;
+pub use crate::sphincs_plus::params_sphincs_shake_128f::*;
 #[cfg(feature = "sphincs_shake_128s")]
-use crate::sphincs_plus::params_sphincs_shake_128s::*;
+pub use crate::sphincs_plus::params_sphincs_shake_128s::*;
 #[cfg(feature = "sphincs_shake_192f")]
-use crate::sphincs_plus::params_sphincs_shake_192f::*;
+pub use crate::sphincs_plus::params_sphincs_shake_192f::*;
 #[cfg(feature = "sphincs_shake_192s")]
-use crate::sphincs_plus::params_sphincs_shake_192s::*;
+pub use crate::sphincs_plus::params_sphincs_shake_192s::*;
 #[cfg(feature = "sphincs_shake_256f")]
-use crate::sphincs_plus::params_sphincs_shake_256f::*;
+pub use crate::sphincs_plus::params_sphincs_shake_256f::*;
 #[cfg(feature = "sphincs_shake_256s")]
-use crate::sphincs_plus::params_sphincs_shake_256s::*;
+pub use crate::sphincs_plus::params_sphincs_shake_256s::*;
 
-use crate::array_struct;
-use crate::error::{Error, VerificationError};
 #[cfg(feature = "sphincs_sha2_128f")]
 use pqcrypto_sphincsplus::sphincssha2128fsimple::*;
 #[cfg(feature = "sphincs_sha2_128s")]
@@ -206,29 +206,29 @@ use pqcrypto_sphincsplus::sphincsshake256fsimple::*;
 use pqcrypto_sphincsplus::sphincsshake256ssimple::*;
 
 #[cfg(feature = "sphincs_sha2_128f")]
-pub mod params_sphincs_sha2_128f;
+mod params_sphincs_sha2_128f;
 #[cfg(feature = "sphincs_sha2_128s")]
-pub mod params_sphincs_sha2_128s;
+mod params_sphincs_sha2_128s;
 #[cfg(feature = "sphincs_sha2_192f")]
-pub mod params_sphincs_sha2_192f;
+mod params_sphincs_sha2_192f;
 #[cfg(feature = "sphincs_sha2_192s")]
-pub mod params_sphincs_sha2_192s;
+mod params_sphincs_sha2_192s;
 #[cfg(feature = "sphincs_sha2_256f")]
-pub mod params_sphincs_sha2_256f;
+mod params_sphincs_sha2_256f;
 #[cfg(feature = "sphincs_sha2_256s")]
-pub mod params_sphincs_sha2_256s;
+mod params_sphincs_sha2_256s;
 #[cfg(feature = "sphincs_shake_128f")]
-pub mod params_sphincs_shake_128f;
+mod params_sphincs_shake_128f;
 #[cfg(feature = "sphincs_shake_128s")]
-pub mod params_sphincs_shake_128s;
+mod params_sphincs_shake_128s;
 #[cfg(feature = "sphincs_shake_192f")]
-pub mod params_sphincs_shake_192f;
+mod params_sphincs_shake_192f;
 #[cfg(feature = "sphincs_shake_192s")]
-pub mod params_sphincs_shake_192s;
+mod params_sphincs_shake_192s;
 #[cfg(feature = "sphincs_shake_256f")]
-pub mod params_sphincs_shake_256f;
+mod params_sphincs_shake_256f;
 #[cfg(feature = "sphincs_shake_256s")]
-pub mod params_sphincs_shake_256s;
+mod params_sphincs_shake_256s;
 
 #[cfg(any(
     feature = "sphincs_sha2_128f",
@@ -238,7 +238,7 @@ pub mod params_sphincs_shake_256s;
     feature = "sphincs_sha2_256f",
     feature = "sphincs_sha2_256s",
 ))]
-pub mod sha2_offsets;
+mod sha2_offsets;
 #[cfg(any(
     feature = "sphincs_shake_128f",
     feature = "sphincs_shake_128s",
@@ -247,124 +247,26 @@ pub mod sha2_offsets;
     feature = "sphincs_shake_256f",
     feature = "sphincs_shake_256s",
 ))]
-pub mod shake_offsets;
+mod shake_offsets;
 
-// pub const CRYPTO_PUBLICKEYBYTES: usize = SPX_PK_BYTES;
-// pub const CRYPTO_SECRETKEYBYTES: usize = SPX_SK_BYTES;
-// pub const CRYPTO_BYTES: usize = SPX_BYTES;
-// const CRYPTO_SEEDBYTES: usize = 3 * SPX_N;
-
-// #[derive(Copy, Clone, Default, Debug)]
-// pub struct SphincsContext {
-//     pub pub_seed: [u8; SPX_N],
-//     pub sk_seed: [u8; SPX_N],
-// }
-
-// /// `SphincsPlusPublicKey` securely holds public-key for the SPHINCS+ signature scheme, using a
-// /// `u8; CRYPTO_PUBLICKEYBYTES` internal field.
-// /// This struct implements `Zeroize`, ensuring the data is wiped from memory when dropped (`#[zeroize(drop)]`).
-// /// Cloning is supported but should be done cautiously, as it duplicates sensitive information in memory.
-// #[derive(Clone, Debug, Zeroize)]
-// #[zeroize(drop)]
-// #[cfg_attr(feature = "serialization", derive(Serialize, Deserialize))]
-// pub struct SphincsPlusPublicKey(
-//     #[cfg_attr(feature = "serialization", serde(with = "BigArray"))] [u8; SPX_PK_BYTES],
-// );
-//
-// impl AsRef<[u8]> for SphincsPlusPublicKey {
-//     fn as_ref(&self) -> &[u8] {
-//         &self.0
-//     }
-// }
-//
-// impl TryFrom<&[u8]> for SphincsPlusPublicKey {
-//     type Error = SphincsError;
-//     fn try_from(data: &[u8]) -> Result<Self, SphincsError> {
-//         if data.len() != SPX_PK_BYTES {
-//             Err(SphincsError::BadLength(SPX_PK_BYTES, data.len()))
-//         } else {
-//             let mut array = [0u8; SPX_PK_BYTES];
-//             array.copy_from_slice(data);
-//             Ok(Self(array))
-//         }
-//     }
-// }
-//
-// impl From<[u8; SPX_PK_BYTES]> for SphincsPlusPublicKey {
-//     fn from(value: [u8; SPX_PK_BYTES]) -> Self {
-//         Self(value)
-//     }
-// }
-//
-// /// `SphincsPlusSecretKey` securely holds public-key for the SPHINCS+ signature scheme, using a
-// /// `u8; CRYPTO_SECRETKEYBYTES` internal field.
-// /// This struct implements `Zeroize`, ensuring the data is wiped from memory when dropped (`#[zeroize(drop)]`).
-// #[derive(Clone, Debug, Zeroize)]
-// #[zeroize(drop)]
-// #[cfg_attr(feature = "serialization", derive(Serialize, Deserialize))]
-// pub struct SphincsPlusSecretKey(
-//     #[cfg_attr(feature = "serialization", serde(with = "BigArray"))] [u8; SPX_SK_BYTES],
-// );
-//
-// impl AsRef<[u8]> for SphincsPlusSecretKey {
-//     fn as_ref(&self) -> &[u8] {
-//         &self.0
-//     }
-// }
-//
-// impl TryFrom<&[u8]> for SphincsPlusSecretKey {
-//     type Error = SphincsError;
-//     fn try_from(data: &[u8]) -> Result<SphincsPlusSecretKey, SphincsError> {
-//         if data.len() != SPX_SK_BYTES {
-//             Err(SphincsError::BadLength(SPX_SK_BYTES, data.len()))
-//         } else {
-//             let mut array = [0u8; SPX_SK_BYTES];
-//             array.copy_from_slice(data);
-//             Ok(SphincsPlusSecretKey(array))
-//         }
-//     }
-// }
-//
-// impl From<[u8; SPX_SK_BYTES]> for SphincsPlusSecretKey {
-//     fn from(value: [u8; SPX_SK_BYTES]) -> Self {
-//         Self(value)
-//     }
-// }
-//
-// /// `SphincsPlusSignature` securely holds public-key for the SPHINCS+ signature scheme, using a
-// /// `u8; CRYPTO_BYTES` internal field.
-// /// This struct implements `Zeroize`, ensuring the data is wiped from memory when dropped (`#[zeroize(drop)]`).
-// #[derive(Clone, Debug, Zeroize)]
-// #[zeroize(drop)]
-// #[cfg_attr(feature = "serialization", derive(Serialize, Deserialize))]
-// pub struct SphincsPlusSignature(
-//     #[cfg_attr(feature = "serialization", serde(with = "BigArray"))] [u8; SPX_BYTES],
-// );
-//
-// impl AsRef<[u8]> for SphincsPlusSignature {
-//     fn as_ref(&self) -> &[u8] {
-//         &self.0
-//     }
-// }
-//
-// impl TryFrom<&[u8]> for SphincsPlusSignature {
-//     type Error = SphincsError;
-//     fn try_from(data: &[u8]) -> Result<SphincsPlusSignature, SphincsError> {
-//         if data.len() != SPX_BYTES {
-//             Err(SphincsError::BadLength(SPX_BYTES, data.len()))
-//         } else {
-//             let mut array = [0u8; SPX_BYTES];
-//             array.copy_from_slice(data);
-//             Ok(SphincsPlusSignature(array))
-//         }
-//     }
-// }
-//
-// impl From<[u8; SPX_BYTES]> for SphincsPlusSignature {
-//     fn from(value: [u8; SPX_BYTES]) -> Self {
-//         Self(value)
-//     }
-// }
+#[cfg(any(
+    feature = "sphincs_sha2_128f",
+    feature = "sphincs_sha2_128s",
+    feature = "sphincs_sha2_192f",
+    feature = "sphincs_sha2_192s",
+    feature = "sphincs_sha2_256f",
+    feature = "sphincs_sha2_256s",
+))]
+pub use crate::sphincs_plus::sha2_offsets::*;
+#[cfg(any(
+    feature = "sphincs_shake_128f",
+    feature = "sphincs_shake_128s",
+    feature = "sphincs_shake_192f",
+    feature = "sphincs_shake_192s",
+    feature = "sphincs_shake_256f",
+    feature = "sphincs_shake_256s",
+))]
+pub use crate::sphincs_plus::shake_offsets::*;
 
 array_struct!(SphincsPlusPublicKey, SPX_PK_BYTES);
 array_struct!(SphincsPlusSecretKey, SPX_SK_BYTES);

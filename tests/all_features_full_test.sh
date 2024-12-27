@@ -1,31 +1,38 @@
-# run_tests.sh
+#!/bin/bash
 set -e
 
-cargo test --no-default-features --features sphincs_sha2_128f,in-memory
-cargo test --no-default-features --features sphincs_sha2_128s,in-memory
-cargo test --no-default-features --features sphincs_sha2_192f,in-memory
-cargo test --no-default-features --features sphincs_sha2_192s,in-memory
-cargo test --no-default-features --features sphincs_sha2_256f,in-memory
-cargo test --no-default-features --features sphincs_sha2_256s,in-memory
+sphincs_features=(
+  "sphincs_sha2_128f"
+  "sphincs_sha2_128s"
+  "sphincs_sha2_192f"
+  "sphincs_sha2_192s"
+  "sphincs_sha2_256f"
+  "sphincs_sha2_256s"
+  "sphincs_shake_128f"
+  "sphincs_shake_128s"
+  "sphincs_shake_192f"
+  "sphincs_shake_192s"
+  "sphincs_shake_256f"
+  "sphincs_shake_256s"
+)
 
-cargo test --no-default-features --features sphincs_shake_128f,in-memory
-cargo test --no-default-features --features sphincs_shake_128s,in-memory
-cargo test --no-default-features --features sphincs_shake_192f,in-memory
-cargo test --no-default-features --features sphincs_shake_192s,in-memory
-cargo test --no-default-features --features sphincs_shake_256f,in-memory
-cargo test --no-default-features --features sphincs_shake_256s,in-memory
+storage_features=("in-disk" "in-memory")
 
+for sphincs in "${sphincs_features[@]}"; do
+  for storage in "${storage_features[@]}"; do
+    echo "Testing with features: $sphincs, $storage"
+    cargo build --no-default-features --features "$sphincs $storage" --verbose
+    if [ $? -ne 0 ]; then
+      echo "Build failed for features: $sphincs, $storage"
+      exit 1
+    fi
 
-cargo test --no-default-features --features sphincs_sha2_128f,in-disk
-cargo test --no-default-features --features sphincs_sha2_128s,in-disk
-cargo test --no-default-features --features sphincs_sha2_192f,in-disk
-cargo test --no-default-features --features sphincs_sha2_192s,in-disk
-cargo test --no-default-features --features sphincs_sha2_256f,in-disk
-cargo test --no-default-features --features sphincs_sha2_256s,in-disk
+    cargo test --no-default-features --features "$sphincs $storage" --verbose
+    if [ $? -ne 0 ]; then
+      echo "Tests failed for features: $sphincs, $storage"
+      exit 1
+    fi
+  done
+done
 
-cargo test --no-default-features --features sphincs_shake_128f,in-disk
-cargo test --no-default-features --features sphincs_shake_128s,in-disk
-cargo test --no-default-features --features sphincs_shake_192f,in-disk
-cargo test --no-default-features --features sphincs_shake_192s,in-disk
-cargo test --no-default-features --features sphincs_shake_256f,in-disk
-cargo test --no-default-features --features sphincs_shake_256s,in-disk
+echo "All combinations built and tested successfully!"

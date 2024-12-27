@@ -1,5 +1,10 @@
 use crate::params::WOTSPLUS_ADRS_LAYER;
-use crate::utils::{get_byte_at, set_byte_at, set_u32_at, set_u64_at};
+use crate::sphincs_plus::{
+    SPX_OFFSET_CHAIN_ADDR, SPX_OFFSET_HASH_ADDR, SPX_OFFSET_KP_ADDR1, SPX_OFFSET_LAYER,
+    SPX_OFFSET_TREE, SPX_OFFSET_TREE_HGT, SPX_OFFSET_TREE_INDEX, SPX_OFFSET_TYPE,
+};
+use crate::utils::{set_byte_at, set_u32_at, set_u64_at};
+use crate::wots_plus::WTS_ADRS_RAND_BYTES;
 use rand::rngs::OsRng;
 use rand::RngCore;
 use std::convert::TryInto;
@@ -12,20 +17,7 @@ use std::convert::TryInto;
     feature = "sphincs_sha2_256f",
     feature = "sphincs_sha2_256s",
 ))]
-use crate::sphincs_plus::sha2_offsets::*;
-
-#[cfg(any(
-    feature = "sphincs_shake_128f",
-    feature = "sphincs_shake_128s",
-    feature = "sphincs_shake_192f",
-    feature = "sphincs_shake_192s",
-    feature = "sphincs_shake_256f",
-    feature = "sphincs_shake_256s",
-))]
-use crate::sphincs_plus::shake_offsets::*;
-use crate::wots_plus::WTS_ADRS_RAND_BYTES;
-// layer in WOTS+ for user is SPX_D
-// tree_addr: choose a "secure" random 64-bit value
+use crate::sphincs_plus::SPX_SHA256_ADDR_BYTES;
 
 #[derive(Copy, Clone, Debug)]
 #[repr(u8)]
@@ -170,7 +162,7 @@ impl Adrs {
     /// used when we're doing multiple things within the same OTS keypair.
     pub fn copy_keypair_addr(&self, dst: &mut [u8; 32]) {
         self.copy_subtree_addr(dst);
-        dst[SPX_OFFSET_KP_ADDR1] = get_byte_at(self.0.as_slice(), SPX_OFFSET_KP_ADDR1);
+        dst[SPX_OFFSET_KP_ADDR1] = self.0[SPX_OFFSET_KP_ADDR1];
     }
 
     /// Specify which Merkle chain within the OTS we're working with

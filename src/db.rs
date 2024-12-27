@@ -1,92 +1,62 @@
+use crate::params::DGSP_POS_BYTES;
+use async_trait::async_trait;
+use std::path::Path;
+
 #[cfg(feature = "in-disk")]
 pub mod in_disk;
 #[cfg(feature = "in-memory")]
 pub mod in_memory;
 
-#[cfg(test)]
-mod tests {
-    #[cfg(feature = "in-disk")]
-    use crate::db::in_disk::*;
-    #[cfg(feature = "in-memory")]
-    use crate::db::in_memory::*;
+/// Private List of the Manager in the DGSP scheme. It is responsible for storing and updating
+/// username of each user, user activity status, and the number of issued certificates created
+/// for each user.
+#[async_trait(?Send)]
+pub trait PLMInterface {
+    /// Open or create the PLM database, using the given `path`.
+    async fn open<P: AsRef<Path>>(path: P) -> Result<Self, crate::Error>
+    where
+        Self: Sized;
 
-    use crate::error::Error;
-    use crate::params::DGSP_POS_BYTES;
-    use rand::distributions::Alphanumeric;
-    use rand::rngs::OsRng;
-    use rand::{Rng, RngCore};
-    use tempfile::TempDir;
+    /// Add a new user if it does not already exist.
+    ///
+    /// Returns `Ok(id)` if newly added. Otherwise, throws an error if given username already
+    /// exists, or if other errors occur.
+    async fn add_new_user(&self, username: &str) -> Result<u64, crate::Error>;
 
-    const TEST_DB_PATH: &str = "test_db";
+    /// Deactivate a user by ID
+    async fn deactivate_id(&self, id: u64) -> Result<(), crate::Error>;
 
-    fn random_str(length: usize) -> String {
-        rand::thread_rng()
-            .sample_iter(&Alphanumeric)
-            .take(length)
-            .map(char::from)
-            .collect()
-    }
+    /// Get counter of created certificates for a given user ID
+    async fn get_ctr_id(&self, id: u64) -> Result<u64, crate::Error>;
 
-    #[test]
-    fn test_plm_add_username() {
-        let username = random_str(rand::thread_rng().gen_range(1..30));
-        let temp_dir = TempDir::new().expect("Failed to create temp dir");
-        let plm = PLM::open_with_path(temp_dir.path().join(TEST_DB_PATH)).unwrap();
-        let id = plm.add_new_user(&username).unwrap();
-        assert_eq!(id, 0u64);
-        assert_eq!(
-            plm.add_new_user(&username),
-            Err(Error::UsernameAlreadyExists(username.clone()))
-        );
-        let id2 = plm.add_new_user(format!("{}2", username).as_str()).unwrap();
-        assert_eq!(id2, 1u64);
-    }
+    /// Get username by ID
+    async fn get_username(&self, id: u64) -> Result<String, crate::Error>;
 
-    #[test]
-    fn test_plm_id() {
-        let username = random_str(rand::thread_rng().gen_range(1..30));
-        let temp_dir = TempDir::new().expect("Failed to create temp dir");
-        let plm = PLM::open_with_path(temp_dir.path().join(TEST_DB_PATH)).unwrap();
-        let id = plm.add_new_user(&username).unwrap();
-        assert!(plm.id_exists(id).unwrap());
-        assert!(plm.id_is_active(id).unwrap());
-        assert_eq!(plm.get_ctr_id(id).unwrap(), 0u64);
-        assert_eq!(plm.get_username(id).unwrap(), username);
-        plm.deactivate_id(id).unwrap();
-        assert!(!plm.id_is_active(id).unwrap());
-    }
+    /// Check if ID exists
+    async fn id_exists(&self, id: u64) -> Result<bool, crate::Error>;
 
-    #[test]
-    fn test_plm_ctr_cert() {
-        let username = random_str(rand::thread_rng().gen_range(1..30));
-        let temp_dir = TempDir::new().expect("Failed to create temp dir");
-        let plm = PLM::open_with_path(temp_dir.path().join(TEST_DB_PATH)).unwrap();
-        let id = plm.add_new_user(&username).unwrap();
-        plm.increment_ctr_id_by(id, 1u64).unwrap();
-        assert_eq!(plm.get_ctr_id(id).unwrap(), 1u64);
+    /// Check if ID is active
+    async fn id_is_active(&self, id: u64) -> Result<bool, crate::Error>;
 
-        #[cfg(feature = "in-disk")]
-        let error_prefix = "sled error: Unsupported: ";
-        #[cfg(feature = "in-memory")]
-        let error_prefix = "";
+    /// Increment number of created certificates of a user by `add` value.
+    ///
+    /// Returns `Ok(id)` if request is valid and no error occurs. Otherwise, throws an error if
+    /// current issued certificates counter of the ID plus `add` value exceeds [`u64::MAX`] bound.
+    async fn increment_ctr_id_by(&self, id: u64, add: u64) -> Result<(), crate::Error>;
+}
 
-        assert_eq!(
-            plm.increment_ctr_id_by(id, u64::MAX),
-            Err(Error::DbInternalError(format!(
-                "{}Exceeds max certificate generation for the user {}",
-                error_prefix, id
-            )))
-        );
-    }
+/// RevokedList is a public list containing the DGSP.pos values to show which signatures and issued
+/// certificates are revoked.
+#[async_trait(?Send)]
+pub trait RevokedListInterface {
+    /// Open or create the RevokedList database, using the given `path`.
+    async fn open<P: AsRef<Path>>(path: P) -> Result<Self, crate::Error>
+    where
+        Self: Sized;
 
-    #[test]
-    fn test_revoked_list() {
-        let temp_dir = TempDir::new().expect("Failed to create temp dir");
-        let rl = RevokedList::open_with_path(temp_dir.path().join(TEST_DB_PATH)).unwrap();
-        let mut pos = [0u8; DGSP_POS_BYTES];
-        OsRng.fill_bytes(&mut pos);
-        assert!(!rl.contains(&pos).unwrap());
-        rl.insert(pos).unwrap();
-        assert!(rl.contains(&pos).unwrap());
-    }
+    /// Check if a given pos exists in the RevokedList
+    async fn contains(&self, pos: &[u8]) -> Result<bool, crate::Error>;
+
+    /// Insert a given pos into the RevokedList
+    async fn insert(&self, pos: [u8; DGSP_POS_BYTES]) -> Result<(), crate::Error>;
 }
