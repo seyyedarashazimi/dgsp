@@ -9,8 +9,8 @@ use dgsp::InDiskPLM;
 #[cfg(feature = "in-memory")]
 use dgsp::InMemoryPLM;
 use dgsp::PLMInterface;
-use rand::distributions::Alphanumeric;
-use rand::Rng;
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::time::{Duration, Instant};
 
 const GROUP_SIZE: usize = 1 << 10;
 
@@ -58,14 +58,6 @@ async fn setup_in_disk_join() -> InDiskSetup {
     InDiskSetup { skm, plm }
 }
 
-fn random_str(length: usize) -> String {
-    rand::thread_rng()
-        .sample_iter(&Alphanumeric)
-        .take(length)
-        .map(char::from)
-        .collect()
-}
-
 fn join_benchmarks(c: &mut Criterion) {
     let mut group = c.benchmark_group("DGSP join only");
 
@@ -75,12 +67,34 @@ fn join_benchmarks(c: &mut Criterion) {
 
         let InMemorySetup { skm, plm } = setup_data;
 
+        let counter = AtomicUsize::new(0);
+
         group.bench_function(
             BenchmarkId::new("join_in_memory", format!("(GROUP_SIZE={})", GROUP_SIZE)),
             |b| {
-                b.to_async(FuturesExecutor).iter(|| async {
-                    let username = random_str(20);
-                    black_box(DGSP::join(&skm.msk, username.as_str(), &plm).await.unwrap());
+                b.iter_custom(|num_iters| {
+                    let mut total = Duration::ZERO;
+
+                    for _ in 0..num_iters {
+                        for _ in 0..GROUP_SIZE {
+                            // Precomputation
+                            let idx = counter.fetch_add(1, Ordering::Relaxed);
+                            let username = format!("user_{}", idx);
+
+                            let start = Instant::now();
+                            black_box(
+                                FuturesExecutor
+                                    .block_on(DGSP::join(&skm.msk, username.as_str(), &plm))
+                                    .unwrap(),
+                            );
+                            total += start.elapsed();
+                        }
+                    }
+                    let nanos_total = total.as_nanos() as f64;
+                    let avg_nanos = nanos_total / GROUP_SIZE as f64;
+
+                    let avg_nanos_ceil = avg_nanos.max(1.0).round() as u64;
+                    Duration::from_nanos(avg_nanos_ceil)
                 });
             },
         );
@@ -92,12 +106,34 @@ fn join_benchmarks(c: &mut Criterion) {
 
         let InDiskSetup { skm, plm } = setup_data;
 
+        let counter = AtomicUsize::new(0);
+
         group.bench_function(
             BenchmarkId::new("join_in_disk", format!("(GROUP_SIZE={})", GROUP_SIZE)),
             |b| {
-                b.to_async(FuturesExecutor).iter(|| async {
-                    let username = random_str(20);
-                    black_box(DGSP::join(&skm.msk, username.as_str(), &plm).await.unwrap());
+                b.iter_custom(|num_iters| {
+                    let mut total = Duration::ZERO;
+
+                    for _ in 0..num_iters {
+                        for _ in 0..GROUP_SIZE {
+                            // Precomputation
+                            let idx = counter.fetch_add(1, Ordering::Relaxed);
+                            let username = format!("user_{}", idx);
+
+                            let start = Instant::now();
+                            black_box(
+                                FuturesExecutor
+                                    .block_on(DGSP::join(&skm.msk, username.as_str(), &plm))
+                                    .unwrap(),
+                            );
+                            total += start.elapsed();
+                        }
+                    }
+                    let nanos_total = total.as_nanos() as f64;
+                    let avg_nanos = nanos_total / GROUP_SIZE as f64;
+
+                    let avg_nanos_ceil = avg_nanos.max(1.0).round() as u64;
+                    Duration::from_nanos(avg_nanos_ceil)
                 });
             },
         );

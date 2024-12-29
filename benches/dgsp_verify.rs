@@ -26,14 +26,14 @@ struct VerifyData {
 
 #[cfg(feature = "in-memory")]
 struct InMemorySetup {
-    pk_m: DGSPManagerPublicKey,
+    pkm: DGSPManagerPublicKey,
     revoked_list: InMemoryRevokedList,
     verify_inputs: Vec<VerifyData>,
 }
 
 #[cfg(feature = "in-disk")]
 struct InDiskSetup {
-    pk_m: DGSPManagerPublicKey,
+    pkm: DGSPManagerPublicKey,
     revoked_list: InDiskRevokedList,
     verify_inputs: Vec<VerifyData>,
 }
@@ -54,13 +54,13 @@ async fn setup_in_memory_verify() -> InMemorySetup {
         .await
         .unwrap();
 
-    let (pk_m, sk_m) = DGSP::keygen_manager().unwrap();
+    let (pkm, skm) = DGSP::keygen_manager().unwrap();
 
     let usernames: Vec<String> = (1..=GROUP_SIZE).map(|i| format!("user_{}", i)).collect();
     let mut ids_cids = Vec::with_capacity(GROUP_SIZE);
 
     for username in &usernames {
-        let (id, cid) = DGSP::join(&sk_m.msk, username, &plm).await.unwrap();
+        let (id, cid) = DGSP::join(&skm.msk, username, &plm).await.unwrap();
         ids_cids.push((id, cid));
     }
 
@@ -73,7 +73,7 @@ async fn setup_in_memory_verify() -> InMemorySetup {
         OsRng.fill_bytes(&mut message);
 
         let (wots_pks, mut wots_rands) = DGSP::cert_sign_req_user(&seed_u, SIGN_SIZE);
-        let mut certs = DGSP::req_cert(&sk_m.msk, id, cid, &wots_pks, &plm, &sk_m.spx_sk)
+        let mut certs = DGSP::req_cert(&skm.msk, id, cid, &wots_pks, &plm, &skm.spx_sk)
             .await
             .unwrap();
 
@@ -91,7 +91,7 @@ async fn setup_in_memory_verify() -> InMemorySetup {
     }
 
     InMemorySetup {
-        pk_m,
+        pkm,
         revoked_list,
         verify_inputs,
     }
@@ -110,13 +110,13 @@ async fn setup_in_disk_verify() -> InDiskSetup {
         .await
         .unwrap();
 
-    let (pk_m, sk_m) = DGSP::keygen_manager().unwrap();
+    let (pkm, skm) = DGSP::keygen_manager().unwrap();
 
     let usernames: Vec<String> = (1..=GROUP_SIZE).map(|i| format!("user_{}", i)).collect();
     let mut ids_cids = Vec::with_capacity(GROUP_SIZE);
 
     for username in &usernames {
-        let (id, cid) = DGSP::join(&sk_m.msk, username, &plm).await.unwrap();
+        let (id, cid) = DGSP::join(&skm.msk, username, &plm).await.unwrap();
         ids_cids.push((id, cid));
     }
 
@@ -128,7 +128,7 @@ async fn setup_in_disk_verify() -> InDiskSetup {
         OsRng.fill_bytes(&mut message);
 
         let (wots_pks, mut wots_rands) = DGSP::cert_sign_req_user(&seed_u, SIGN_SIZE);
-        let mut certs = DGSP::req_cert(&sk_m.msk, id, cid, &wots_pks, &plm, &sk_m.spx_sk)
+        let mut certs = DGSP::req_cert(&skm.msk, id, cid, &wots_pks, &plm, &skm.spx_sk)
             .await
             .unwrap();
 
@@ -146,7 +146,7 @@ async fn setup_in_disk_verify() -> InDiskSetup {
     }
 
     InDiskSetup {
-        pk_m,
+        pkm,
         revoked_list,
         verify_inputs,
     }
@@ -160,7 +160,7 @@ fn verify_benchmarks(c: &mut Criterion) {
         let setup_data = FuturesExecutor.block_on(setup_in_memory_verify());
 
         let InMemorySetup {
-            pk_m,
+            pkm,
             revoked_list,
             verify_inputs,
         } = setup_data;
@@ -174,7 +174,7 @@ fn verify_benchmarks(c: &mut Criterion) {
                 b.to_async(FuturesExecutor).iter(|| async {
                     let data = verify_inputs.choose(&mut thread_rng()).unwrap();
                     black_box(
-                        DGSP::verify(&data.message, &data.signature, &revoked_list, &pk_m).await,
+                        DGSP::verify(&data.message, &data.signature, &revoked_list, &pkm).await,
                     )
                     .unwrap();
                 });
@@ -187,7 +187,7 @@ fn verify_benchmarks(c: &mut Criterion) {
         let setup_data = FuturesExecutor.block_on(setup_in_disk_verify());
 
         let InDiskSetup {
-            pk_m,
+            pkm,
             revoked_list,
             verify_inputs,
         } = setup_data;
@@ -204,7 +204,7 @@ fn verify_benchmarks(c: &mut Criterion) {
                 b.to_async(FuturesExecutor).iter(|| async {
                     let data = verify_inputs.choose(&mut thread_rng()).unwrap();
                     black_box(
-                        DGSP::verify(&data.message, &data.signature, &revoked_list, &pk_m).await,
+                        DGSP::verify(&data.message, &data.signature, &revoked_list, &pkm).await,
                     )
                     .unwrap();
                 });

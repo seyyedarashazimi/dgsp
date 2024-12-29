@@ -24,7 +24,7 @@ async fn join_in_memory_benchmark() {
         .await
         .unwrap();
 
-    let (_, sk_m) = DGSP::keygen_manager().unwrap();
+    let (_, skm) = DGSP::keygen_manager().unwrap();
 
     let mut results = Vec::with_capacity(GROUP_SIZE as usize);
     let mut elapsed_total = Duration::new(0, 0);
@@ -32,9 +32,7 @@ async fn join_in_memory_benchmark() {
     for i in 1..=GROUP_SIZE {
         let username = format!("user_{}", i);
         let start = Instant::now();
-        let result = DGSP::join(&sk_m.msk, username.as_str(), &plm)
-            .await
-            .unwrap();
+        let result = DGSP::join(&skm.msk, username.as_str(), &plm).await.unwrap();
         let elapsed = start.elapsed();
         elapsed_total += elapsed;
 
@@ -58,7 +56,7 @@ async fn join_in_disk_benchmark() {
 
     let plm = InDiskPLM::open(temp_dir.path().join("join")).await.unwrap();
 
-    let (_, sk_m) = DGSP::keygen_manager().unwrap();
+    let (_, skm) = DGSP::keygen_manager().unwrap();
 
     let mut results = Vec::with_capacity(GROUP_SIZE as usize);
     let mut elapsed_total = Duration::new(0, 0);
@@ -66,9 +64,7 @@ async fn join_in_disk_benchmark() {
     for i in 1..=GROUP_SIZE {
         let username = format!("user_{}", i);
         let start = Instant::now();
-        let result = DGSP::join(&sk_m.msk, username.as_str(), &plm)
-            .await
-            .unwrap();
+        let result = DGSP::join(&skm.msk, username.as_str(), &plm).await.unwrap();
         let elapsed = start.elapsed();
         elapsed_total += elapsed;
 

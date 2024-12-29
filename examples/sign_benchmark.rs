@@ -27,14 +27,14 @@ async fn sign_in_memory_benchmark() {
         .await
         .unwrap();
 
-    let (_, sk_m) = DGSP::keygen_manager().unwrap();
+    let (_, skm) = DGSP::keygen_manager().unwrap();
 
     let usernames: Vec<String> = (1..=GROUP_SIZE).map(|i| format!("user_{}", i)).collect();
 
     let mut ids_cids = Vec::with_capacity(GROUP_SIZE as usize);
 
     for username in &usernames {
-        ids_cids.push(DGSP::join(&sk_m.msk, username, &plm).await.unwrap());
+        ids_cids.push(DGSP::join(&skm.msk, username, &plm).await.unwrap());
     }
 
     let mut message = [0u8; 1];
@@ -53,7 +53,7 @@ async fn sign_in_memory_benchmark() {
             elapsed_total_csr += start_csr.elapsed();
 
             let start_cert = Instant::now();
-            let mut certs = DGSP::req_cert(&sk_m.msk, id, cid, &wots_pks, &plm, &sk_m.spx_sk)
+            let mut certs = DGSP::req_cert(&skm.msk, id, cid, &wots_pks, &plm, &skm.spx_sk)
                 .await
                 .unwrap();
             elapsed_total_cert += start_cert.elapsed();
@@ -99,14 +99,14 @@ async fn sign_in_disk_benchmark() {
 
     let plm = InDiskPLM::open(temp_dir.path().join("join")).await.unwrap();
 
-    let (_, sk_m) = DGSP::keygen_manager().unwrap();
+    let (_, skm) = DGSP::keygen_manager().unwrap();
 
     let usernames: Vec<String> = (1..=GROUP_SIZE).map(|i| format!("user_{}", i)).collect();
 
     let mut ids_cids = Vec::with_capacity(GROUP_SIZE as usize);
 
     for username in &usernames {
-        ids_cids.push(DGSP::join(&sk_m.msk, username, &plm).await.unwrap());
+        ids_cids.push(DGSP::join(&skm.msk, username, &plm).await.unwrap());
     }
 
     let mut message = [0u8; 1];
@@ -125,7 +125,7 @@ async fn sign_in_disk_benchmark() {
             elapsed_total_csr += start_csr.elapsed();
 
             let start_cert = Instant::now();
-            let mut certs = DGSP::req_cert(&sk_m.msk, id, cid, &wots_pks, &plm, &sk_m.spx_sk)
+            let mut certs = DGSP::req_cert(&skm.msk, id, cid, &wots_pks, &plm, &skm.spx_sk)
                 .await
                 .unwrap();
             elapsed_total_cert += start_cert.elapsed();

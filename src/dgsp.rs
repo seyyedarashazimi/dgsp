@@ -361,13 +361,13 @@ mod tests {
             .unwrap();
 
         // Create manager keys
-        let (pk_m, sk_m) = DGSP::keygen_manager().unwrap();
+        let (pkm, skm) = DGSP::keygen_manager().unwrap();
 
         // Create user u1 and join
         let seed_u1 = DGSP::keygen_user();
         let username_u1 = random_str(10);
         // let username_u1 = "0";
-        let (id_u1, cid_u1) = DGSP::join(&sk_m.msk, username_u1.as_str(), &plm)
+        let (id_u1, cid_u1) = DGSP::join(&skm.msk, username_u1.as_str(), &plm)
             .await
             .unwrap();
 
@@ -376,7 +376,7 @@ mod tests {
         let (wots_pks, mut wots_rands) = DGSP::cert_sign_req_user(&seed_u1, B);
 
         // Obtain certificates for the given csr batch
-        let mut certs = DGSP::req_cert(&sk_m.msk, id_u1, cid_u1, &wots_pks, &plm, &sk_m.spx_sk)
+        let mut certs = DGSP::req_cert(&skm.msk, id_u1, cid_u1, &wots_pks, &plm, &skm.spx_sk)
             .await
             .unwrap();
 
@@ -390,18 +390,18 @@ mod tests {
         let sig = DGSP::sign(&message, &wots_rand, &seed_u1, cert);
 
         // Verify the signature
-        DGSP::verify(&message, &sig, &revoked_list, &pk_m)
+        DGSP::verify(&message, &sig, &revoked_list, &pkm)
             .await
             .unwrap();
 
         // Obtain username and id from sig
         assert_eq!(
-            DGSP::open(&sk_m.msk, &plm, &sig).await.unwrap(),
+            DGSP::open(&skm.msk, &plm, &sig).await.unwrap(),
             (id_u1, username_u1)
         );
 
         // Revoke a user and its certificates
-        DGSP::revoke(&sk_m.msk, &plm, vec![id_u1], &revoked_list)
+        DGSP::revoke(&skm.msk, &plm, vec![id_u1], &revoked_list)
             .await
             .unwrap();
         assert!(revoked_list.contains(&sig.pos).await.unwrap());
@@ -413,7 +413,7 @@ mod tests {
         // Make sure no cert will be created for that id from now on.
         let (wots_pks_new, _) = DGSP::cert_sign_req_user(&seed_u1, 1);
         assert_eq!(
-            DGSP::req_cert(&sk_m.msk, id_u1, cid_u1, &wots_pks_new, &plm, &sk_m.spx_sk).await,
+            DGSP::req_cert(&skm.msk, id_u1, cid_u1, &wots_pks_new, &plm, &skm.spx_sk).await,
             Err(Error::InvalidCertReq)
         );
 
@@ -423,7 +423,7 @@ mod tests {
         let message_new = (0..len).map(|_| rng.gen::<u8>()).collect::<Vec<_>>();
         let sig_new = DGSP::sign(&message_new, &wots_rand_new, &seed_u1, cert_new);
         assert_eq!(
-            DGSP::verify(&message_new, &sig_new, &revoked_list, &pk_m).await,
+            DGSP::verify(&message_new, &sig_new, &revoked_list, &pkm).await,
             Err(Error::VerificationFailed(
                 VerificationError::RevokedSignature
             ))
@@ -451,13 +451,13 @@ mod tests {
             .unwrap();
 
         // Create manager keys
-        let (pk_m, sk_m) = DGSP::keygen_manager().unwrap();
+        let (pkm, skm) = DGSP::keygen_manager().unwrap();
 
         // Create user u1 and join
         let seed_u1 = DGSP::keygen_user();
         let username_u1 = random_str(10);
         // let username_u1 = "0";
-        let (id_u1, cid_u1) = DGSP::join(&sk_m.msk, username_u1.as_str(), &plm)
+        let (id_u1, cid_u1) = DGSP::join(&skm.msk, username_u1.as_str(), &plm)
             .await
             .unwrap();
 
@@ -466,7 +466,7 @@ mod tests {
         let (wots_pks, mut wots_rands) = DGSP::cert_sign_req_user(&seed_u1, B);
 
         // Obtain certificates for the given csr batch
-        let mut certs = DGSP::req_cert(&sk_m.msk, id_u1, cid_u1, &wots_pks, &plm, &sk_m.spx_sk)
+        let mut certs = DGSP::req_cert(&skm.msk, id_u1, cid_u1, &wots_pks, &plm, &skm.spx_sk)
             .await
             .unwrap();
 
@@ -480,18 +480,18 @@ mod tests {
         let sig = DGSP::sign(&message, &wots_rand, &seed_u1, cert);
 
         // Verify the signature
-        DGSP::verify(&message, &sig, &revoked_list, &pk_m)
+        DGSP::verify(&message, &sig, &revoked_list, &pkm)
             .await
             .unwrap();
 
         // Obtain username and id from sig
         assert_eq!(
-            DGSP::open(&sk_m.msk, &plm, &sig).await.unwrap(),
+            DGSP::open(&skm.msk, &plm, &sig).await.unwrap(),
             (id_u1, username_u1)
         );
 
         // Revoke a user and its certificates
-        DGSP::revoke(&sk_m.msk, &plm, vec![id_u1], &revoked_list)
+        DGSP::revoke(&skm.msk, &plm, vec![id_u1], &revoked_list)
             .await
             .unwrap();
         assert!(revoked_list.contains(&sig.pos).await.unwrap());
@@ -503,7 +503,7 @@ mod tests {
         // Make sure no cert will be created for that id from now on.
         let (wots_pks_new, _) = DGSP::cert_sign_req_user(&seed_u1, 1);
         assert_eq!(
-            DGSP::req_cert(&sk_m.msk, id_u1, cid_u1, &wots_pks_new, &plm, &sk_m.spx_sk).await,
+            DGSP::req_cert(&skm.msk, id_u1, cid_u1, &wots_pks_new, &plm, &skm.spx_sk).await,
             Err(Error::InvalidCertReq)
         );
 
@@ -513,7 +513,7 @@ mod tests {
         let message_new = (0..len).map(|_| rng.gen::<u8>()).collect::<Vec<_>>();
         let sig_new = DGSP::sign(&message_new, &wots_rand_new, &seed_u1, cert_new);
         assert_eq!(
-            DGSP::verify(&message_new, &sig_new, &revoked_list, &pk_m).await,
+            DGSP::verify(&message_new, &sig_new, &revoked_list, &pkm).await,
             Err(Error::VerificationFailed(
                 VerificationError::RevokedSignature
             ))

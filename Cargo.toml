@@ -49,6 +49,14 @@ harness = false
 name = "dgsp_verify"
 harness = false
 
+[[bench]]
+name = "dgsp_open"
+harness = false
+
+[[bench]]
+name = "dgsp_revoke"
+harness = false
+
 [features]
 in-disk = ["sled", "bincode", "serialization"]
 in-memory = []

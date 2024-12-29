@@ -10,10 +10,10 @@ pub mod in_memory;
 /// Private List of the Manager in the DGSP scheme. It is responsible for storing and updating
 /// username of each user, user activity status, and the number of issued certificates created
 /// for each user.
-#[async_trait(?Send)]
+#[async_trait]
 pub trait PLMInterface {
     /// Open or create the PLM database, using the given `path`.
-    async fn open<P: AsRef<Path>>(path: P) -> Result<Self, crate::Error>
+    async fn open<P: AsRef<Path> + Send>(path: P) -> Result<Self, crate::Error>
     where
         Self: Sized;
 
@@ -47,10 +47,10 @@ pub trait PLMInterface {
 
 /// RevokedList is a public list containing the DGSP.pos values to show which signatures and issued
 /// certificates are revoked.
-#[async_trait(?Send)]
+#[async_trait]
 pub trait RevokedListInterface {
     /// Open or create the RevokedList database, using the given `path`.
-    async fn open<P: AsRef<Path>>(path: P) -> Result<Self, crate::Error>
+    async fn open<P: AsRef<Path> + Send>(path: P) -> Result<Self, crate::Error>
     where
         Self: Sized;
 

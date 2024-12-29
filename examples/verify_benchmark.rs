@@ -31,14 +31,14 @@ async fn verify_in_memory_benchmark() {
         .await
         .unwrap();
 
-    let (pk_m, sk_m) = DGSP::keygen_manager().unwrap();
+    let (pkm, skm) = DGSP::keygen_manager().unwrap();
 
     let usernames: Vec<String> = (1..=GROUP_SIZE).map(|i| format!("user_{}", i)).collect();
 
     let mut ids_cids = Vec::with_capacity(GROUP_SIZE as usize);
 
     for username in &usernames {
-        ids_cids.push(DGSP::join(&sk_m.msk, username, &plm).await.unwrap());
+        ids_cids.push(DGSP::join(&skm.msk, username, &plm).await.unwrap());
     }
 
     let mut message = [0u8; 1];
@@ -51,7 +51,7 @@ async fn verify_in_memory_benchmark() {
         for _ in 0..SIGN_SIZE {
             let (wots_pks, mut wots_rands) = DGSP::cert_sign_req_user(&seed_u, 1);
 
-            let mut certs = DGSP::req_cert(&sk_m.msk, id, cid, &wots_pks, &plm, &sk_m.spx_sk)
+            let mut certs = DGSP::req_cert(&skm.msk, id, cid, &wots_pks, &plm, &skm.spx_sk)
                 .await
                 .unwrap();
 
@@ -61,7 +61,7 @@ async fn verify_in_memory_benchmark() {
             let sig = DGSP::sign(&message, &wots_rand, &seed_u, cert);
 
             let start = Instant::now();
-            black_box(DGSP::verify(&message, &sig, &revoked_list, &pk_m).await).unwrap();
+            black_box(DGSP::verify(&message, &sig, &revoked_list, &pkm).await).unwrap();
             let elapsed = start.elapsed();
             elapsed_total += elapsed;
         }
@@ -88,14 +88,14 @@ async fn verify_in_disk_benchmark() {
         .await
         .unwrap();
 
-    let (pk_m, sk_m) = DGSP::keygen_manager().unwrap();
+    let (pkm, skm) = DGSP::keygen_manager().unwrap();
 
     let usernames: Vec<String> = (1..=GROUP_SIZE).map(|i| format!("user_{}", i)).collect();
 
     let mut ids_cids = Vec::with_capacity(GROUP_SIZE as usize);
 
     for username in &usernames {
-        ids_cids.push(DGSP::join(&sk_m.msk, username, &plm).await.unwrap());
+        ids_cids.push(DGSP::join(&skm.msk, username, &plm).await.unwrap());
     }
 
     let mut message = [0u8; 1];
@@ -108,7 +108,7 @@ async fn verify_in_disk_benchmark() {
         for _ in 0..SIGN_SIZE {
             let (wots_pks, mut wots_rands) = DGSP::cert_sign_req_user(&seed_u, 1);
 
-            let mut certs = DGSP::req_cert(&sk_m.msk, id, cid, &wots_pks, &plm, &sk_m.spx_sk)
+            let mut certs = DGSP::req_cert(&skm.msk, id, cid, &wots_pks, &plm, &skm.spx_sk)
                 .await
                 .unwrap();
 
@@ -118,7 +118,7 @@ async fn verify_in_disk_benchmark() {
             let sig = DGSP::sign(&message, &wots_rand, &seed_u, cert);
 
             let start = Instant::now();
-            black_box(DGSP::verify(&message, &sig, &revoked_list, &pk_m).await).unwrap();
+            black_box(DGSP::verify(&message, &sig, &revoked_list, &pkm).await).unwrap();
             let elapsed = start.elapsed();
             elapsed_total += elapsed;
         }

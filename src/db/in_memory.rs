@@ -41,9 +41,9 @@ pub struct InMemoryPLM {
     data: Arc<Mutex<InMemoryPLMData>>,
 }
 
-#[async_trait(?Send)]
+#[async_trait]
 impl PLMInterface for InMemoryPLM {
-    async fn open<P: AsRef<Path>>(_: P) -> Result<Self, crate::Error> {
+    async fn open<P: AsRef<Path> + Send>(_: P) -> Result<Self, crate::Error> {
         Ok(Self {
             data: Arc::new(Mutex::new(InMemoryPLMData::default())),
         })
@@ -127,9 +127,9 @@ impl PLMInterface for InMemoryPLM {
 #[derive(Default)]
 pub struct InMemoryRevokedList(Arc<Mutex<HashSet<[u8; DGSP_POS_BYTES]>>>);
 
-#[async_trait(?Send)]
+#[async_trait]
 impl RevokedListInterface for InMemoryRevokedList {
-    async fn open<P: AsRef<Path>>(_: P) -> Result<Self, crate::Error> {
+    async fn open<P: AsRef<Path> + Send>(_: P) -> Result<Self, crate::Error> {
         Ok(InMemoryRevokedList::default())
     }
 

@@ -30,13 +30,13 @@ where
                     }
                 }
                 if message.starts_with("UsernameAlreadyExists:") {
-                    // Try to parse the number from the message
+                    // Parse the username from the message
                     if let Some(str) = message.strip_prefix("UsernameAlreadyExists:") {
                         let username = str.trim().parse::<String>().unwrap();
                         return crate::Error::UsernameAlreadyExists(username);
                     }
                 }
-                sled::Error::Unsupported(reason.to_string()).into()
+                sled::Error::Unsupported(message).into()
             },
         }
     }
@@ -60,9 +60,9 @@ pub struct InDiskPLM {
 
 const NEXT_ID_KEY: &[u8] = b"__next_id";
 
-#[async_trait(?Send)]
+#[async_trait]
 impl PLMInterface for InDiskPLM {
-    async fn open<P: AsRef<Path>>(path: P) -> Result<Self, crate::Error> {
+    async fn open<P: AsRef<Path> + Send>(path: P) -> Result<Self, crate::Error> {
         let db = sled::open(path.as_ref().join("plm"))?;
         let plme_tree = db.open_tree("plme_tree")?;
         let name_tree = db.open_tree("name_tree")?;
@@ -222,9 +222,9 @@ pub struct InDiskRevokedList {
     tree: sled::Tree,
 }
 
-#[async_trait(?Send)]
+#[async_trait]
 impl RevokedListInterface for InDiskRevokedList {
-    async fn open<P: AsRef<Path>>(path: P) -> Result<Self, crate::Error> {
+    async fn open<P: AsRef<Path> + Send>(path: P) -> Result<Self, crate::Error> {
         let db = sled::open(path.as_ref().join("rl"))?;
         let tree = db.open_tree("revoked_list")?;
         Ok(Self { tree })
