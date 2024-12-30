@@ -15,7 +15,7 @@ use dgsp::{InDiskPLM, InDiskRevokedList};
 #[cfg(feature = "in-memory")]
 use dgsp::{InMemoryPLM, InMemoryRevokedList};
 
-const SIGN_SIZE: usize = 1 << 2;
+const CERTIFICATE_ISSUED_SIZE: usize = 1 << 0;
 const GROUP_SIZE: usize = 1 << 10;
 
 #[cfg(feature = "in-memory")]
@@ -97,7 +97,10 @@ fn revoke_benchmarks(c: &mut Criterion) {
         group.bench_function(
             BenchmarkId::new(
                 "revoke_in_memory",
-                format!("(SIGN_SIZE={}, GROUP_SIZE={})", SIGN_SIZE, GROUP_SIZE),
+                format!(
+                    "(GROUP_SIZE={}, CERTIFICATE_ISSUED_SIZE={})",
+                    GROUP_SIZE, CERTIFICATE_ISSUED_SIZE
+                ),
             ),
             |b| {
                 b.iter_custom(|num_iters| {
@@ -111,7 +114,8 @@ fn revoke_benchmarks(c: &mut Criterion) {
                             .block_on(DGSP::join(&skm.msk, &username, &plm))
                             .unwrap();
                         let seed_u = DGSP::keygen_user();
-                        let (wots_pks, _) = DGSP::cert_sign_req_user(&seed_u, SIGN_SIZE);
+                        let (wots_pks, _) =
+                            DGSP::cert_sign_req_user(&seed_u, CERTIFICATE_ISSUED_SIZE);
                         black_box(
                             FuturesExecutor
                                 .block_on(DGSP::req_cert(
@@ -164,7 +168,10 @@ fn revoke_benchmarks(c: &mut Criterion) {
         group.bench_function(
             BenchmarkId::new(
                 "revoke_in_disk",
-                format!("(SIGN_SIZE={}, GROUP_SIZE={})", SIGN_SIZE, GROUP_SIZE),
+                format!(
+                    "(GROUP_SIZE={}, CERTIFICATE_ISSUED_SIZE={})",
+                    GROUP_SIZE, CERTIFICATE_ISSUED_SIZE
+                ),
             ),
             |b| {
                 b.iter_custom(|num_iters| {
@@ -178,7 +185,8 @@ fn revoke_benchmarks(c: &mut Criterion) {
                             .block_on(DGSP::join(&skm.msk, &username, &plm))
                             .unwrap();
                         let seed_u = DGSP::keygen_user();
-                        let (wots_pks, _) = DGSP::cert_sign_req_user(&seed_u, SIGN_SIZE);
+                        let (wots_pks, _) =
+                            DGSP::cert_sign_req_user(&seed_u, CERTIFICATE_ISSUED_SIZE);
                         black_box(
                             FuturesExecutor
                                 .block_on(DGSP::req_cert(

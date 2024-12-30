@@ -15,7 +15,6 @@ use dgsp::InDiskPLM;
 #[cfg(feature = "in-memory")]
 use dgsp::InMemoryPLM;
 
-const SIGN_SIZE: usize = 1 << 0;
 const GROUP_SIZE: usize = 1 << 10;
 
 struct CertData {
@@ -65,14 +64,13 @@ async fn setup_in_memory_cert() -> InMemorySetup {
     for (id, cid) in ids_cids {
         let seed_u = DGSP::keygen_user();
 
-        let (wots_pks, _) = DGSP::cert_sign_req_user(&seed_u, SIGN_SIZE);
-        for _ in 0..SIGN_SIZE {
-            cert_inputs.push(CertData {
-                id,
-                cid,
-                pk_wots: wots_pks.clone(),
-            });
-        }
+        let (wots_pks, _) = DGSP::cert_sign_req_user(&seed_u, 1);
+
+        cert_inputs.push(CertData {
+            id,
+            cid,
+            pk_wots: wots_pks.clone(),
+        });
     }
 
     InMemorySetup {
@@ -107,14 +105,13 @@ async fn setup_in_disk_cert() -> InDiskSetup {
     for (id, cid) in ids_cids {
         let seed_u = DGSP::keygen_user();
 
-        let (wots_pks, _) = DGSP::cert_sign_req_user(&seed_u, SIGN_SIZE);
-        for _ in 0..SIGN_SIZE {
-            cert_inputs.push(CertData {
-                id,
-                cid,
-                pk_wots: wots_pks.clone(),
-            });
-        }
+        let (wots_pks, _) = DGSP::cert_sign_req_user(&seed_u, 1);
+
+        cert_inputs.push(CertData {
+            id,
+            cid,
+            pk_wots: wots_pks.clone(),
+        });
     }
 
     InDiskSetup {
@@ -138,10 +135,7 @@ fn cert_benchmarks(c: &mut Criterion) {
         } = setup_data;
 
         group.bench_function(
-            BenchmarkId::new(
-                "cert_in_memory",
-                format!("(SIGN_SIZE={}, GROUP_SIZE={})", SIGN_SIZE, GROUP_SIZE),
-            ),
+            BenchmarkId::new("cert_in_memory", format!("GROUP_SIZE={}", GROUP_SIZE)),
             |b| {
                 b.to_async(FuturesExecutor).iter(|| async {
                     let data = cert_inputs.choose(&mut thread_rng()).unwrap();
@@ -173,10 +167,7 @@ fn cert_benchmarks(c: &mut Criterion) {
         } = setup_data;
 
         group.bench_function(
-            BenchmarkId::new(
-                "cert_in_disk",
-                format!("(SIGN_SIZE={}, GROUP_SIZE={})", SIGN_SIZE, GROUP_SIZE),
-            ),
+            BenchmarkId::new("cert_in_disk", format!("GROUP_SIZE={}", GROUP_SIZE)),
             |b| {
                 b.to_async(FuturesExecutor).iter(|| async {
                     let data = cert_inputs.choose(&mut thread_rng()).unwrap();

@@ -12,7 +12,7 @@ use dgsp::PLMInterface;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
 
-const GROUP_SIZE: usize = 1 << 10;
+const GROUP_SIZE: usize = 1 << 15;
 
 #[cfg(feature = "in-memory")]
 struct InMemorySetup {

@@ -16,7 +16,6 @@ use dgsp::InDiskPLM;
 #[cfg(feature = "in-memory")]
 use dgsp::InMemoryPLM;
 
-const SIGN_SIZE: usize = 1 << 0;
 const GROUP_SIZE: usize = 1 << 10;
 
 struct SignData {
@@ -66,21 +65,20 @@ async fn setup_in_memory_sign() -> InMemorySetup {
         let mut message = [0u8; 1];
         OsRng.fill_bytes(&mut message);
 
-        let (wots_pks, mut wots_rands) = DGSP::cert_sign_req_user(&seed_u, SIGN_SIZE);
+        let (wots_pks, mut wots_rands) = DGSP::cert_sign_req_user(&seed_u, 1);
         let mut certs = DGSP::req_cert(&skm.msk, id, cid, &wots_pks, &plm, &skm.spx_sk)
             .await
             .unwrap();
-        for _ in 0..SIGN_SIZE {
-            let wots_rand = wots_rands.pop().unwrap();
-            let cert = certs.pop().unwrap();
 
-            sign_inputs.push(SignData {
-                message: message.to_vec(),
-                wots_rand,
-                seed_u,
-                cert,
-            });
-        }
+        let wots_rand = wots_rands.pop().unwrap();
+        let cert = certs.pop().unwrap();
+
+        sign_inputs.push(SignData {
+            message: message.to_vec(),
+            wots_rand,
+            seed_u,
+            cert,
+        });
     }
 
     InMemorySetup { sign_inputs }
@@ -114,25 +112,25 @@ async fn setup_in_disk_sign() -> InDiskSetup {
         let mut message = [0u8; 1];
         OsRng.fill_bytes(&mut message);
 
-        let (wots_pks, mut wots_rands) = DGSP::cert_sign_req_user(&seed_u, SIGN_SIZE);
+        let (wots_pks, mut wots_rands) = DGSP::cert_sign_req_user(&seed_u, 1);
         let mut certs = DGSP::req_cert(&skm.msk, id, cid, &wots_pks, &plm, &skm.spx_sk)
             .await
             .unwrap();
-        for _ in 0..SIGN_SIZE {
-            let wots_rand = wots_rands.pop().unwrap();
-            let cert = certs.pop().unwrap();
 
-            sign_inputs.push(SignData {
-                message: message.to_vec(),
-                wots_rand,
-                seed_u,
-                cert,
-            });
-        }
+        let wots_rand = wots_rands.pop().unwrap();
+        let cert = certs.pop().unwrap();
+
+        sign_inputs.push(SignData {
+            message: message.to_vec(),
+            wots_rand,
+            seed_u,
+            cert,
+        });
     }
 
     InDiskSetup { sign_inputs }
 }
+
 fn sign_benchmarks(c: &mut Criterion) {
     let mut group = c.benchmark_group("DGSP sign only");
 
@@ -143,10 +141,7 @@ fn sign_benchmarks(c: &mut Criterion) {
         let InMemorySetup { sign_inputs } = setup_data;
 
         group.bench_function(
-            BenchmarkId::new(
-                "sign_in_memory",
-                format!("(SIGN_SIZE={}, GROUP_SIZE={})", SIGN_SIZE, GROUP_SIZE),
-            ),
+            BenchmarkId::new("sign_in_memory", format!("GROUP_SIZE={}", GROUP_SIZE)),
             |b| {
                 b.iter(|| {
                     let data = sign_inputs.choose(&mut thread_rng()).unwrap();
@@ -168,10 +163,7 @@ fn sign_benchmarks(c: &mut Criterion) {
         let InDiskSetup { sign_inputs } = setup_data;
 
         group.bench_function(
-            BenchmarkId::new(
-                "sign_in_disk",
-                format!("(SIGN_SIZE={}, GROUP_SIZE={})", SIGN_SIZE, GROUP_SIZE),
-            ),
+            BenchmarkId::new("sign_in_disk", format!("GROUP_SIZE={}", GROUP_SIZE)),
             |b| {
                 b.iter(|| {
                     let data = sign_inputs.choose(&mut thread_rng()).unwrap();
