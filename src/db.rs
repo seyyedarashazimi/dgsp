@@ -1,5 +1,6 @@
 use crate::params::DGSP_POS_BYTES;
 use async_trait::async_trait;
+use std::fmt::Display;
 use std::path::Path;
 
 #[cfg(feature = "in-disk")]
@@ -13,15 +14,18 @@ pub mod in_memory;
 #[async_trait]
 pub trait PLMInterface {
     /// Open or create the PLM database, using the given `path`.
-    async fn open<P: AsRef<Path> + Send>(path: P) -> Result<Self, crate::Error>
+    async fn open<P>(path: P) -> Result<Self, crate::Error>
     where
-        Self: Sized;
+        Self: Sized,
+        P: AsRef<Path> + Send;
 
     /// Add a new user if it does not already exist.
     ///
     /// Returns `Ok(id)` if newly added. Otherwise, throws an error if given username already
     /// exists, or if other errors occur.
-    async fn add_new_user(&self, username: &str) -> Result<u64, crate::Error>;
+    async fn add_new_user<S>(&self, username: S) -> Result<u64, crate::Error>
+    where
+        S: AsRef<str> + Display + Send;
 
     /// Deactivate a user by ID
     async fn deactivate_id(&self, id: u64) -> Result<(), crate::Error>;

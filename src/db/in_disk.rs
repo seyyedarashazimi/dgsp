@@ -2,13 +2,22 @@ use crate::db::{PLMInterface, RevokedListInterface};
 use crate::params::DGSP_POS_BYTES;
 use crate::utils::{bytes_to_u64, u64_to_bytes};
 use async_trait::async_trait;
+use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 use sled::Transactional;
-use std::path::Path;
+use std::fmt::Display;
+use std::fs;
+use std::path::{Path, PathBuf};
 
 impl From<sled::Error> for crate::Error {
     fn from(e: sled::Error) -> Self {
         Self::DbInternalError(format!("sled error: {}", e))
+    }
+}
+
+impl From<std::io::Error> for crate::Error {
+    fn from(e: std::io::Error) -> Self {
+        Self::DbInternalError(format!("io error: {}", e))
     }
 }
 
@@ -53,6 +62,8 @@ struct InDiskPLMEntry {
 /// username of each user, user activity status, and the number of issued certificates created
 /// for each user.
 pub struct InDiskPLM {
+    path: PathBuf,
+    db: sled::Db,
     plme_tree: sled::Tree,
     name_tree: sled::Tree,
     meta_tree: sled::Tree,
@@ -62,12 +73,18 @@ const NEXT_ID_KEY: &[u8] = b"__next_id";
 
 #[async_trait]
 impl PLMInterface for InDiskPLM {
-    async fn open<P: AsRef<Path> + Send>(path: P) -> Result<Self, crate::Error> {
-        let db = sled::open(path.as_ref().join("plm"))?;
+    async fn open<P>(path: P) -> Result<Self, crate::Error>
+    where
+        P: AsRef<Path> + Send,
+    {
+        let path = path.as_ref().join("plm");
+        let db = sled::open(&path)?;
         let plme_tree = db.open_tree("plme_tree")?;
         let name_tree = db.open_tree("name_tree")?;
         let meta_tree = db.open_tree("meta_tree")?;
         Ok(Self {
+            path,
+            db,
             plme_tree,
             name_tree,
             meta_tree,
@@ -78,8 +95,11 @@ impl PLMInterface for InDiskPLM {
     ///
     /// Returns `Ok(id)` if newly added. Otherwise, throws an `crate::errors::Error` error if given
     /// username already existed, or if an error occurs.
-    async fn add_new_user(&self, username: &str) -> Result<u64, crate::Error> {
-        let username_bytes = username.as_bytes();
+    async fn add_new_user<S>(&self, username: S) -> Result<u64, crate::Error>
+    where
+        S: AsRef<str> + Display + Send,
+    {
+        let username_bytes = username.as_ref().as_bytes();
 
         let new_id = (&self.plme_tree, &self.name_tree, &self.meta_tree).transaction(
             |(ptree, ntree, mtree)| {
@@ -216,30 +236,63 @@ impl PLMInterface for InDiskPLM {
     }
 }
 
+impl InDiskPLM {
+    pub fn size_in_disk(&self) -> Result<u64, crate::Error> {
+        self.db.flush()?;
+        disk_usage(&self.path)
+    }
+}
+
 /// RevokedList is a public list containing the DGSP.pos values to show which signatures and issued
 /// certificates are revoked.
 pub struct InDiskRevokedList {
-    tree: sled::Tree,
+    path: PathBuf,
+    db: sled::Db,
 }
 
 #[async_trait]
 impl RevokedListInterface for InDiskRevokedList {
     async fn open<P: AsRef<Path> + Send>(path: P) -> Result<Self, crate::Error> {
-        let db = sled::open(path.as_ref().join("rl"))?;
-        let tree = db.open_tree("revoked_list")?;
-        Ok(Self { tree })
+        let path = path.as_ref().join("rl");
+        let db = sled::open(&path)?;
+        Ok(Self { path, db })
     }
 
     /// Check if a given pos exists in the RevokedList
     async fn contains(&self, pos: &[u8]) -> Result<bool, crate::Error> {
-        Ok(self.tree.get(pos)?.is_some())
+        Ok(self.db.get(pos)?.is_some())
     }
 
     /// Insert a given pos into the RevokedList
     async fn insert(&self, pos: [u8; DGSP_POS_BYTES]) -> Result<(), crate::Error> {
-        self.tree.insert(pos, &[])?;
+        self.db.insert(pos, &[])?;
         Ok(())
     }
+}
+
+impl InDiskRevokedList {
+    pub fn size_in_disk(&self) -> Result<u64, crate::Error> {
+        self.db.flush()?;
+        disk_usage(&self.path)
+    }
+}
+
+fn disk_usage<P: AsRef<Path>>(path: P) -> Result<u64, crate::Error> {
+    let entries: Vec<_> = fs::read_dir(path)?.collect::<Result<_, _>>()?;
+
+    let sum = entries
+        .par_iter()
+        .map(|entry| {
+            let path = entry.path();
+            match fs::metadata(&path) {
+                Ok(metadata) if metadata.is_dir() => disk_usage(path).unwrap_or(0),
+                Ok(metadata) if metadata.is_file() => metadata.len(),
+                _ => 0,
+            }
+        })
+        .sum();
+
+    Ok(sum)
 }
 
 #[cfg(test)]
@@ -331,5 +384,28 @@ mod tests {
         assert!(!rl.contains(&pos).await.unwrap());
         rl.insert(pos).await.unwrap();
         assert!(rl.contains(&pos).await.unwrap());
+    }
+
+    #[tokio::test]
+    async fn test_in_disk_db_size() {
+        use tempfile::TempDir;
+
+        let temp_dir = TempDir::new().unwrap();
+        let plm = InDiskPLM::open(temp_dir.path()).await.unwrap();
+
+        // Perform operations
+        plm.add_new_user("user1").await.unwrap();
+        plm.add_new_user("user2").await.unwrap();
+
+        // Check on-disk size
+        let plm_size = plm.size_in_disk().unwrap();
+        println!("On-disk size of InDiskPLM: {} bytes", plm_size);
+
+        let rl = InDiskRevokedList::open(temp_dir.path()).await.unwrap();
+        rl.insert([0u8; DGSP_POS_BYTES]).await.unwrap();
+
+        // Check on-disk size
+        let rl_size = rl.size_in_disk().unwrap();
+        println!("On-disk size of InDiskRevokedList: {} bytes", rl_size);
     }
 }

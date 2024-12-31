@@ -1,3 +1,4 @@
+use crate::bench_utils::format_size;
 use criterion::async_executor::AsyncExecutor;
 use criterion::{
     async_executor::FuturesExecutor, black_box, criterion_group, criterion_main, BenchmarkId,
@@ -11,8 +12,11 @@ use dgsp::InMemoryPLM;
 use dgsp::PLMInterface;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
+use tempfile::TempDir;
 
-const GROUP_SIZE: usize = 1 << 15;
+mod bench_utils;
+
+const GROUP_SIZE: usize = 1 << 10;
 
 #[cfg(feature = "in-memory")]
 struct InMemorySetup {
@@ -24,22 +28,13 @@ struct InMemorySetup {
 struct InDiskSetup {
     skm: DGSPManagerSecretKey,
     plm: InDiskPLM,
+    temp_dir: TempDir,
 }
 
 #[cfg(feature = "in-memory")]
 async fn setup_in_memory_join() -> InMemorySetup {
-    let project_root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let temp_dir = tempfile::Builder::new()
-        .prefix("temp_example_db_")
-        .tempdir_in(&project_root)
-        .expect("Failed to create temporary directory in project root");
-
-    let plm = InMemoryPLM::open(temp_dir.path().join("join"))
-        .await
-        .unwrap();
-
+    let plm = InMemoryPLM::open("").await.unwrap();
     let (_, skm) = DGSP::keygen_manager().unwrap();
-
     InMemorySetup { skm, plm }
 }
 
@@ -52,10 +47,8 @@ async fn setup_in_disk_join() -> InDiskSetup {
         .expect("Failed to create temporary directory in project root");
 
     let plm = InDiskPLM::open(temp_dir.path().join("join")).await.unwrap();
-
     let (_, skm) = DGSP::keygen_manager().unwrap();
-
-    InDiskSetup { skm, plm }
+    InDiskSetup { skm, plm, temp_dir }
 }
 
 fn join_benchmarks(c: &mut Criterion) {
@@ -78,15 +71,19 @@ fn join_benchmarks(c: &mut Criterion) {
                     for _ in 0..num_iters {
                         for _ in 0..GROUP_SIZE {
                             // Precomputation
-                            let idx = counter.fetch_add(1, Ordering::Relaxed);
-                            let username = format!("user_{}", idx);
+                            let username = counter.fetch_add(1, Ordering::Relaxed).to_string();
 
+                            // Start timer
                             let start = Instant::now();
+
+                            // Benchmark
                             black_box(
                                 FuturesExecutor
-                                    .block_on(DGSP::join(&skm.msk, username.as_str(), &plm))
+                                    .block_on(DGSP::join(&skm.msk, &username, &plm))
                                     .unwrap(),
                             );
+
+                            // Stop timer
                             total += start.elapsed();
                         }
                     }
@@ -98,13 +95,18 @@ fn join_benchmarks(c: &mut Criterion) {
                 });
             },
         );
+        // Report size:
+        println!(
+            "Approximate storage of InMemoryPLM: {}",
+            format_size(plm.size_in_memory() as u64)
+        );
     }
 
     #[cfg(feature = "in-disk")]
     {
         let setup_data = FuturesExecutor.block_on(setup_in_disk_join());
 
-        let InDiskSetup { skm, plm } = setup_data;
+        let InDiskSetup { skm, plm, temp_dir } = setup_data;
 
         let counter = AtomicUsize::new(0);
 
@@ -117,15 +119,19 @@ fn join_benchmarks(c: &mut Criterion) {
                     for _ in 0..num_iters {
                         for _ in 0..GROUP_SIZE {
                             // Precomputation
-                            let idx = counter.fetch_add(1, Ordering::Relaxed);
-                            let username = format!("user_{}", idx);
+                            let username = counter.fetch_add(1, Ordering::Relaxed).to_string();
 
+                            // Start timer
                             let start = Instant::now();
+
+                            // Benchmark
                             black_box(
                                 FuturesExecutor
-                                    .block_on(DGSP::join(&skm.msk, username.as_str(), &plm))
+                                    .block_on(DGSP::join(&skm.msk, &username, &plm))
                                     .unwrap(),
                             );
+
+                            // Stop timer
                             total += start.elapsed();
                         }
                     }
@@ -136,6 +142,12 @@ fn join_benchmarks(c: &mut Criterion) {
                     Duration::from_nanos(avg_nanos_ceil)
                 });
             },
+        );
+        // Report size:
+        println!(
+            "Approximate storage of InDiskPLM in {:?}: {}",
+            temp_dir,
+            format_size(plm.size_in_disk().unwrap())
         );
     }
 

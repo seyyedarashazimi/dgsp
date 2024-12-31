@@ -50,6 +50,11 @@ async fn setup_in_memory_revoke() -> InMemorySetup {
 
     let (_, skm) = DGSP::keygen_manager().unwrap();
 
+    // populate group with initial users
+    for u in 0..GROUP_SIZE {
+        DGSP::join(&skm.msk, &u.to_string(), &plm).await.unwrap();
+    }
+
     InMemorySetup {
         skm,
         revoked_list,
@@ -71,6 +76,11 @@ async fn setup_in_disk_revoke() -> InDiskSetup {
         .unwrap();
 
     let (_, skm) = DGSP::keygen_manager().unwrap();
+
+    // populate group with initial users
+    for u in 0..GROUP_SIZE {
+        DGSP::join(&skm.msk, &u.to_string(), &plm).await.unwrap();
+    }
 
     InDiskSetup {
         skm,
@@ -108,8 +118,7 @@ fn revoke_benchmarks(c: &mut Criterion) {
 
                     for _ in 0..num_iters {
                         // Precomputation
-                        let idx = counter.fetch_add(1, Ordering::Relaxed);
-                        let username = format!("user_{}", idx);
+                        let username = counter.fetch_add(1, Ordering::Relaxed).to_string();
                         let (id, cid) = FuturesExecutor
                             .block_on(DGSP::join(&skm.msk, &username, &plm))
                             .unwrap();

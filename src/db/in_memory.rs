@@ -2,6 +2,7 @@ use crate::db::{PLMInterface, RevokedListInterface};
 use crate::params::DGSP_POS_BYTES;
 use async_trait::async_trait;
 use std::collections::HashSet;
+use std::fmt::Display;
 use std::path::Path;
 use std::sync::{Arc, Mutex, PoisonError};
 
@@ -15,6 +16,12 @@ struct InMemoryPLMEntry {
     ctr_certs: u64,
     is_active: bool,
     username: String,
+}
+
+impl InMemoryPLMEntry {
+    pub fn size_in_memory(&self) -> usize {
+        size_of_val(self) + self.username.capacity() // Size of InMemoryPLMEntry and heap-allocated String
+    }
 }
 
 #[derive(Default)]
@@ -53,7 +60,11 @@ impl PLMInterface for InMemoryPLM {
     ///
     /// Returns `Ok(id)` if newly added. Otherwise, throws an `crate::errors::Error` error if given
     /// username already existed, or if an error occurs.
-    async fn add_new_user(&self, username: &str) -> Result<u64, crate::Error> {
+    async fn add_new_user<S>(&self, username: S) -> Result<u64, crate::Error>
+    where
+        S: AsRef<str> + Display + Send,
+    {
+        let username = username.as_ref();
         let mut data = self.data.lock()?;
         if data.set.contains(username) {
             return Err(crate::Error::UsernameAlreadyExists(username.into()));
@@ -122,6 +133,28 @@ impl PLMInterface for InMemoryPLM {
     }
 }
 
+impl InMemoryPLM {
+    pub fn size_in_memory(&self) -> usize {
+        let mut size = size_of_val(self); // Base size of InMemoryPLM (Arc<Mutex<InMemoryPLMData>>)
+
+        if let Ok(data) = self.data.lock() {
+            size += size_of_val(&*data); // Add size of InMemoryPLMData struct
+            size += data
+                .vec
+                .iter()
+                .map(|entry| entry.size_in_memory())
+                .sum::<usize>(); // Add size of Vec<InMemoryPLMEntry>
+            size += data
+                .set
+                .iter()
+                .map(|s| s.capacity() + s.len())
+                .sum::<usize>(); // Add size of HashSet<String>
+        }
+
+        size
+    }
+}
+
 /// RevokedList is a public list containing the DGSP.pos values to show which signatures and issued
 /// certificates are revoked.
 #[derive(Default)]
@@ -144,6 +177,21 @@ impl RevokedListInterface for InMemoryRevokedList {
         let mut data = self.0.lock()?;
         data.insert(pos);
         Ok(())
+    }
+}
+
+impl InMemoryRevokedList {
+    pub fn size_in_memory(&self) -> usize {
+        let mut size = size_of_val(self); // Base size of InMemoryRevokedList (Arc<Mutex<HashSet<[u8; DGSP_POS_BYTES]>>>)
+
+        if let Ok(data) = self.0.lock() {
+            size += data
+                .iter()
+                .map(|_| size_of::<[u8; DGSP_POS_BYTES]>())
+                .sum::<usize>(); // Size of all elements in HashSet
+        }
+
+        size
     }
 }
 
@@ -235,5 +283,22 @@ mod tests {
         assert!(!rl.contains(&pos).await.unwrap());
         rl.insert(pos).await.unwrap();
         assert!(rl.contains(&pos).await.unwrap());
+    }
+
+    #[tokio::test]
+    async fn test_in_memory_sizes() {
+        let plm = InMemoryPLM::default();
+        plm.add_new_user("user1").await.unwrap();
+        plm.add_new_user("user2").await.unwrap();
+
+        println!("InMemoryPLM size in RAM: {} bytes", plm.size_in_memory());
+
+        let rl = InMemoryRevokedList::default();
+        rl.insert([0u8; DGSP_POS_BYTES]).await.unwrap();
+
+        println!(
+            "InMemoryRevokedList size in RAM: {} bytes",
+            rl.size_in_memory()
+        );
     }
 }
