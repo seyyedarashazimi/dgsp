@@ -3,10 +3,11 @@ use dgsp::dgsp::DGSP;
 use std::time::{Duration, Instant};
 
 fn csr_benchmarks(c: &mut Criterion) {
-    let mut group = c.benchmark_group("DGSP csr only");
+    let alg_name = "csr";
+    let mut group = c.benchmark_group(format!("DGSP_{}", alg_name));
 
     {
-        group.bench_function(BenchmarkId::new("csr", ""), |b| {
+        group.bench_function(BenchmarkId::new(alg_name, ""), |b| {
             b.iter_custom(|num_iters| {
                 let mut total = Duration::ZERO;
                 for _ in 0..num_iters {

@@ -1,34 +1,41 @@
-use crate::bench_utils::format_size;
-use criterion::async_executor::AsyncExecutor;
-use criterion::{
-    async_executor::FuturesExecutor, black_box, criterion_group, criterion_main, BenchmarkId,
-    Criterion,
-};
+use crate::bench_utils::{disk_usage, format_size};
+use criterion::async_executor::{AsyncExecutor, FuturesExecutor};
+use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion};
 use dgsp::dgsp::{DGSPManagerSecretKey, DGSP};
+use dgsp::PLMInterface;
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::time::{Duration, Instant};
+
 #[cfg(feature = "in-disk")]
 use dgsp::InDiskPLM;
 #[cfg(feature = "in-memory")]
 use dgsp::InMemoryPLM;
-use dgsp::PLMInterface;
-use std::sync::atomic::{AtomicUsize, Ordering};
-use std::time::{Duration, Instant};
+#[cfg(feature = "in-disk")]
 use tempfile::TempDir;
 
 mod bench_utils;
 
-const GROUP_SIZE: usize = 1 << 10;
+const GROUP_SIZE: u64 = 1 << 10;
+
+// Set the following to be true if you want to keep the temporarily-created databases
+// for further inspections.
+const KEEP_CREATED_DATABASES: bool = false;
+
+static ALG_NAME: &str = "join";
+
+static ONCE: std::sync::Once = std::sync::Once::new();
 
 #[cfg(feature = "in-memory")]
-struct InMemorySetup {
-    skm: DGSPManagerSecretKey,
-    plm: InMemoryPLM,
+pub struct InMemorySetup {
+    pub skm: DGSPManagerSecretKey,
+    pub plm: InMemoryPLM,
 }
 
 #[cfg(feature = "in-disk")]
-struct InDiskSetup {
-    skm: DGSPManagerSecretKey,
-    plm: InDiskPLM,
-    temp_dir: TempDir,
+pub struct InDiskSetup {
+    pub skm: DGSPManagerSecretKey,
+    pub plm: InDiskPLM,
+    pub temp_dir: TempDir,
 }
 
 #[cfg(feature = "in-memory")]
@@ -46,29 +53,32 @@ async fn setup_in_disk_join() -> InDiskSetup {
         .tempdir_in(&project_root)
         .expect("Failed to create temporary directory in project root");
 
-    let plm = InDiskPLM::open(temp_dir.path().join("join")).await.unwrap();
+    let plm = InDiskPLM::open(temp_dir.path().join(ALG_NAME))
+        .await
+        .unwrap();
     let (_, skm) = DGSP::keygen_manager().unwrap();
     InDiskSetup { skm, plm, temp_dir }
 }
 
 fn join_benchmarks(c: &mut Criterion) {
-    let mut group = c.benchmark_group("DGSP join only");
+    let mut group = c.benchmark_group(format!("DGSP_{}", ALG_NAME));
+    group.sample_size(10);
 
     #[cfg(feature = "in-memory")]
     {
-        let setup_data = FuturesExecutor.block_on(setup_in_memory_join());
-
-        let InMemorySetup { skm, plm } = setup_data;
-
-        let counter = AtomicUsize::new(0);
-
         group.bench_function(
-            BenchmarkId::new("join_in_memory", format!("(GROUP_SIZE={})", GROUP_SIZE)),
+            BenchmarkId::new(
+                format!("{}_in_memory", ALG_NAME),
+                format!("GROUP_SIZE={}", GROUP_SIZE),
+            ),
             |b| {
                 b.iter_custom(|num_iters| {
                     let mut total = Duration::ZERO;
 
                     for _ in 0..num_iters {
+                        let setup_data = FuturesExecutor.block_on(setup_in_memory_join());
+                        let InMemorySetup { skm, plm } = setup_data;
+                        let counter = AtomicUsize::new(0);
                         for _ in 0..GROUP_SIZE {
                             // Precomputation
                             let username = counter.fetch_add(1, Ordering::Relaxed).to_string();
@@ -94,29 +104,26 @@ fn join_benchmarks(c: &mut Criterion) {
                     Duration::from_nanos(avg_nanos_ceil)
                 });
             },
-        );
-        // Report size:
-        println!(
-            "Approximate storage of InMemoryPLM: {}",
-            format_size(plm.size_in_memory() as u64)
         );
     }
 
     #[cfg(feature = "in-disk")]
     {
-        let setup_data = FuturesExecutor.block_on(setup_in_disk_join());
-
-        let InDiskSetup { skm, plm, temp_dir } = setup_data;
-
-        let counter = AtomicUsize::new(0);
-
+        // let size_reported = AtomicBool::new(true);
+        let mut usage = 0u64;
         group.bench_function(
-            BenchmarkId::new("join_in_disk", format!("(GROUP_SIZE={})", GROUP_SIZE)),
+            BenchmarkId::new(
+                format!("{}_in_disk", ALG_NAME),
+                format!("(GROUP_SIZE={})", GROUP_SIZE),
+            ),
             |b| {
                 b.iter_custom(|num_iters| {
                     let mut total = Duration::ZERO;
 
                     for _ in 0..num_iters {
+                        let setup_data = FuturesExecutor.block_on(setup_in_disk_join());
+                        let InDiskSetup { skm, plm, temp_dir } = setup_data;
+                        let counter = AtomicUsize::new(0);
                         for _ in 0..GROUP_SIZE {
                             // Precomputation
                             let username = counter.fetch_add(1, Ordering::Relaxed).to_string();
@@ -134,6 +141,16 @@ fn join_benchmarks(c: &mut Criterion) {
                             // Stop timer
                             total += start.elapsed();
                         }
+
+                        // get storage stats once
+                        ONCE.call_once(|| {
+                            usage = disk_usage(&temp_dir).unwrap();
+                            black_box(&temp_dir);
+
+                            if KEEP_CREATED_DATABASES {
+                                let _ = temp_dir.into_path();
+                            }
+                        });
                     }
                     let nanos_total = total.as_nanos() as f64;
                     let avg_nanos = nanos_total / GROUP_SIZE as f64;
@@ -143,11 +160,10 @@ fn join_benchmarks(c: &mut Criterion) {
                 });
             },
         );
-        // Report size:
         println!(
-            "Approximate storage of InDiskPLM in {:?}: {}",
-            temp_dir,
-            format_size(plm.size_in_disk().unwrap())
+            "Approximate logical size of PLM in DGSP {}: {}",
+            ALG_NAME,
+            format_size(usage)
         );
     }
 

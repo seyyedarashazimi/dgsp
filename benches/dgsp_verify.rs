@@ -1,154 +1,99 @@
-use criterion::async_executor::AsyncExecutor;
-use criterion::{
-    async_executor::FuturesExecutor, black_box, criterion_group, criterion_main, BenchmarkId,
-    Criterion,
-};
-use dgsp::dgsp::{DGSPManagerPublicKey, DGSPSignature, DGSP};
+use crate::bench_utils::db_logical_size;
+use criterion::async_executor::{AsyncExecutor, FuturesExecutor};
+use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion};
+use dgsp::dgsp::{DGSPManagerPublicKey, DGSPManagerSecretKey, DGSP};
 use dgsp::{PLMInterface, RevokedListInterface};
 use rand::rngs::OsRng;
-use rand::seq::SliceRandom;
-use rand::{thread_rng, RngCore};
-use std::path::PathBuf;
-use tempfile::Builder;
+use rand::RngCore;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::{Duration, Instant};
 
 #[cfg(feature = "in-disk")]
 use dgsp::{InDiskPLM, InDiskRevokedList};
 #[cfg(feature = "in-memory")]
 use dgsp::{InMemoryPLM, InMemoryRevokedList};
+#[cfg(feature = "in-disk")]
+use tempfile::TempDir;
+
+mod bench_utils;
 
 const GROUP_SIZE: usize = 1 << 10;
 
-struct VerifyData {
-    message: Vec<u8>,
-    signature: DGSPSignature,
-}
+const KEEP_CREATED_DATABASES: bool = false;
+
+static ALG_NAME: &str = "verify";
 
 #[cfg(feature = "in-memory")]
 struct InMemorySetup {
     pkm: DGSPManagerPublicKey,
+    skm: DGSPManagerSecretKey,
+    plm: InMemoryPLM,
     revoked_list: InMemoryRevokedList,
-    verify_inputs: Vec<VerifyData>,
 }
 
 #[cfg(feature = "in-disk")]
 struct InDiskSetup {
     pkm: DGSPManagerPublicKey,
+    skm: DGSPManagerSecretKey,
+    plm: InDiskPLM,
     revoked_list: InDiskRevokedList,
-    verify_inputs: Vec<VerifyData>,
+    temp_dir: TempDir,
 }
 
 #[cfg(feature = "in-memory")]
 async fn setup_in_memory_verify() -> InMemorySetup {
-    let project_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let temp_dir = Builder::new()
-        .prefix("temp_example_db_")
-        .tempdir_in(&project_root)
-        .expect("Failed to create temporary directory in project root");
-
-    let plm = InMemoryPLM::open(temp_dir.path().join("join"))
-        .await
-        .unwrap();
-
-    let revoked_list = InMemoryRevokedList::open(temp_dir.path().join("join"))
-        .await
-        .unwrap();
+    let plm = InMemoryPLM::open("").await.unwrap();
+    let revoked_list = InMemoryRevokedList::open("").await.unwrap();
 
     let (pkm, skm) = DGSP::keygen_manager().unwrap();
 
-    let usernames: Vec<String> = (1..=GROUP_SIZE).map(|i| format!("user_{}", i)).collect();
-    let mut ids_cids = Vec::with_capacity(GROUP_SIZE);
-
-    for username in &usernames {
-        let (id, cid) = DGSP::join(&skm.msk, username, &plm).await.unwrap();
-        ids_cids.push((id, cid));
-    }
-
-    let mut verify_inputs = Vec::with_capacity(GROUP_SIZE);
-
-    for (id, cid) in ids_cids {
-        let seed_u = DGSP::keygen_user();
-
-        let mut message = [0u8; 1];
-        OsRng.fill_bytes(&mut message);
-
-        let (wots_pks, mut wots_rands) = DGSP::cert_sign_req_user(&seed_u, 1);
-        let mut certs = DGSP::req_cert(&skm.msk, id, cid, &wots_pks, &plm, &skm.spx_sk)
-            .await
-            .unwrap();
-
-        let wots_rand = wots_rands.pop().unwrap();
-        let cert = certs.pop().unwrap();
-
-        let sig = DGSP::sign(&message, &wots_rand, &seed_u, cert);
-
-        verify_inputs.push(VerifyData {
-            message: message.to_vec(),
-            signature: sig,
-        });
+    // populate group with initial users
+    for u in 0..GROUP_SIZE {
+        DGSP::join(&skm.msk, &u.to_string(), &plm).await.unwrap();
     }
 
     InMemorySetup {
         pkm,
+        skm,
+        plm,
         revoked_list,
-        verify_inputs,
     }
 }
 
 #[cfg(feature = "in-disk")]
 async fn setup_in_disk_verify() -> InDiskSetup {
-    let project_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let temp_dir = Builder::new()
+    let project_root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let temp_dir = tempfile::Builder::new()
         .prefix("temp_example_db_")
         .tempdir_in(&project_root)
         .expect("Failed to create temporary directory in project root");
 
-    let plm = InDiskPLM::open(temp_dir.path().join("join")).await.unwrap();
-    let revoked_list = InDiskRevokedList::open(temp_dir.path().join("join"))
+    let plm = InDiskPLM::open(temp_dir.path().join(ALG_NAME))
+        .await
+        .unwrap();
+    let revoked_list = InDiskRevokedList::open(temp_dir.path().join(ALG_NAME))
         .await
         .unwrap();
 
     let (pkm, skm) = DGSP::keygen_manager().unwrap();
 
-    let usernames: Vec<String> = (1..=GROUP_SIZE).map(|i| format!("user_{}", i)).collect();
-    let mut ids_cids = Vec::with_capacity(GROUP_SIZE);
-
-    for username in &usernames {
-        let (id, cid) = DGSP::join(&skm.msk, username, &plm).await.unwrap();
-        ids_cids.push((id, cid));
-    }
-
-    let mut verify_inputs = Vec::with_capacity(GROUP_SIZE);
-
-    for (id, cid) in ids_cids {
-        let seed_u = DGSP::keygen_user();
-        let mut message = [0u8; 1];
-        OsRng.fill_bytes(&mut message);
-
-        let (wots_pks, mut wots_rands) = DGSP::cert_sign_req_user(&seed_u, 1);
-        let mut certs = DGSP::req_cert(&skm.msk, id, cid, &wots_pks, &plm, &skm.spx_sk)
-            .await
-            .unwrap();
-
-        let wots_rand = wots_rands.pop().unwrap();
-        let cert = certs.pop().unwrap();
-
-        let sig = DGSP::sign(&message, &wots_rand, &seed_u, cert);
-
-        verify_inputs.push(VerifyData {
-            message: message.to_vec(),
-            signature: sig,
-        });
+    // populate group with initial users
+    for u in 0..GROUP_SIZE {
+        DGSP::join(&skm.msk, &u.to_string(), &plm).await.unwrap();
     }
 
     InDiskSetup {
         pkm,
+        skm,
+        plm,
         revoked_list,
-        verify_inputs,
+        temp_dir,
     }
 }
 
 fn verify_benchmarks(c: &mut Criterion) {
-    let mut group = c.benchmark_group("DGSP verify only");
+    let mut group = c.benchmark_group(format!("DGSP_{}", ALG_NAME));
+    group.sample_size(10);
 
     #[cfg(feature = "in-memory")]
     {
@@ -156,19 +101,65 @@ fn verify_benchmarks(c: &mut Criterion) {
 
         let InMemorySetup {
             pkm,
+            skm,
+            plm,
             revoked_list,
-            verify_inputs,
         } = setup_data;
+        let counter = AtomicU64::new(GROUP_SIZE as u64);
+        let mut message = [0u8; 1];
 
         group.bench_function(
-            BenchmarkId::new("verify_in_memory", format!("GROUP_SIZE={}", GROUP_SIZE)),
+            BenchmarkId::new(
+                format!("{}_in_memory", ALG_NAME),
+                format!("GROUP_SIZE={}", GROUP_SIZE),
+            ),
             |b| {
-                b.to_async(FuturesExecutor).iter(|| async {
-                    let data = verify_inputs.choose(&mut thread_rng()).unwrap();
-                    black_box(
-                        DGSP::verify(&data.message, &data.signature, &revoked_list, &pkm).await,
-                    )
-                    .unwrap();
+                b.iter_custom(|num_iters| {
+                    let mut total = Duration::ZERO;
+
+                    // 1-time precomputation
+                    let username = counter.fetch_add(1, Ordering::Relaxed).to_string();
+                    let (id, cid) = FuturesExecutor
+                        .block_on(DGSP::join(&skm.msk, &username, &plm))
+                        .unwrap();
+                    let seed_u = DGSP::keygen_user();
+
+                    for _ in 0..num_iters {
+                        // Precomputation
+                        let (wots_pks, mut wots_rands) = DGSP::cert_sign_req_user(&seed_u, 1);
+                        let mut certs = FuturesExecutor
+                            .block_on(DGSP::req_cert(
+                                &skm.msk,
+                                id,
+                                cid,
+                                &wots_pks,
+                                &plm,
+                                &skm.spx_sk,
+                            ))
+                            .unwrap();
+                        let wots_rand = wots_rands.pop().unwrap();
+                        let cert = certs.pop().unwrap();
+                        OsRng.fill_bytes(&mut message);
+                        let sig = DGSP::sign(&message, &wots_rand, &seed_u, cert);
+
+                        // Start timer
+                        let start = Instant::now();
+
+                        // Benchmark
+                        let result = black_box(FuturesExecutor.block_on(DGSP::verify(
+                            &message,
+                            &sig,
+                            &revoked_list,
+                            &pkm,
+                        )));
+
+                        // Stop timer
+                        total += start.elapsed();
+
+                        // Check result for errors
+                        result.expect("Verify operation failed");
+                    }
+                    total
                 });
             },
         );
@@ -180,25 +171,79 @@ fn verify_benchmarks(c: &mut Criterion) {
 
         let InDiskSetup {
             pkm,
+            skm,
+            plm,
             revoked_list,
-            verify_inputs,
+            temp_dir,
         } = setup_data;
 
-        use rand::seq::SliceRandom;
-        use rand::thread_rng;
+        let counter = AtomicU64::new(GROUP_SIZE as u64);
+        let mut message = [0u8; 1];
 
         group.bench_function(
-            BenchmarkId::new("verify_in_disk", format!("GROUP_SIZE={}", GROUP_SIZE)),
+            BenchmarkId::new(
+                format!("{}_in_disk", ALG_NAME),
+                format!("GROUP_SIZE={}", GROUP_SIZE),
+            ),
             |b| {
-                b.to_async(FuturesExecutor).iter(|| async {
-                    let data = verify_inputs.choose(&mut thread_rng()).unwrap();
-                    black_box(
-                        DGSP::verify(&data.message, &data.signature, &revoked_list, &pkm).await,
-                    )
-                    .unwrap();
+                b.iter_custom(|num_iters| {
+                    let mut total = Duration::ZERO;
+
+                    // 1-time precomputation
+                    let username = counter.fetch_add(1, Ordering::Relaxed).to_string();
+                    let (id, cid) = FuturesExecutor
+                        .block_on(DGSP::join(&skm.msk, &username, &plm))
+                        .unwrap();
+                    let seed_u = DGSP::keygen_user();
+
+                    for _ in 0..num_iters {
+                        // Precomputation
+                        let (wots_pks, mut wots_rands) = DGSP::cert_sign_req_user(&seed_u, 1);
+                        let mut certs = FuturesExecutor
+                            .block_on(DGSP::req_cert(
+                                &skm.msk,
+                                id,
+                                cid,
+                                &wots_pks,
+                                &plm,
+                                &skm.spx_sk,
+                            ))
+                            .unwrap();
+                        let wots_rand = wots_rands.pop().unwrap();
+                        let cert = certs.pop().unwrap();
+                        OsRng.fill_bytes(&mut message);
+                        let sig = DGSP::sign(&message, &wots_rand, &seed_u, cert);
+
+                        // Start timer
+                        let start = Instant::now();
+
+                        // Benchmark
+                        let result = black_box(FuturesExecutor.block_on(DGSP::verify(
+                            &message,
+                            &sig,
+                            &revoked_list,
+                            &pkm,
+                        )));
+
+                        // Stop timer
+                        total += start.elapsed();
+
+                        // Check result for errors
+                        result.expect("Verification failed");
+                    }
+                    total
                 });
             },
         );
+        let plm_usage = db_logical_size(&plm, &temp_dir, "PLM", ALG_NAME);
+        println!("{}", plm_usage);
+
+        let revoked_list_usage = db_logical_size(&plm, &temp_dir, "RevokedList", ALG_NAME);
+        println!("{}", revoked_list_usage);
+
+        if KEEP_CREATED_DATABASES {
+            let _ = temp_dir.into_path();
+        }
     }
 
     group.finish();

@@ -1,22 +1,26 @@
-use criterion::async_executor::AsyncExecutor;
-use criterion::{
-    async_executor::FuturesExecutor, black_box, criterion_group, criterion_main, BenchmarkId,
-    Criterion,
-};
+use crate::bench_utils::db_logical_size;
+use criterion::async_executor::{AsyncExecutor, FuturesExecutor};
+use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion};
 use dgsp::dgsp::{DGSPManagerSecretKey, DGSP};
 use dgsp::{PLMInterface, RevokedListInterface};
-use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
-use tempfile::Builder;
 
 #[cfg(feature = "in-disk")]
 use dgsp::{InDiskPLM, InDiskRevokedList};
 #[cfg(feature = "in-memory")]
 use dgsp::{InMemoryPLM, InMemoryRevokedList};
+#[cfg(feature = "in-disk")]
+use tempfile::TempDir;
 
-const CERTIFICATE_ISSUED_SIZE: usize = 1 << 0;
-const GROUP_SIZE: usize = 1 << 10;
+mod bench_utils;
+
+const GROUP_SIZE: u64 = 1 << 10;
+const CERTIFICATE_ISSUED_SIZE: usize = 1 << 1;
+
+const KEEP_CREATED_DATABASES: bool = true;
+
+static ALG_NAME: &str = "revoke";
 
 #[cfg(feature = "in-memory")]
 struct InMemorySetup {
@@ -30,23 +34,13 @@ struct InDiskSetup {
     skm: DGSPManagerSecretKey,
     revoked_list: InDiskRevokedList,
     plm: InDiskPLM,
+    temp_dir: TempDir,
 }
 
 #[cfg(feature = "in-memory")]
 async fn setup_in_memory_revoke() -> InMemorySetup {
-    let project_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let temp_dir = Builder::new()
-        .prefix("temp_example_db_")
-        .tempdir_in(&project_root)
-        .expect("Failed to create temporary directory in project root");
-
-    let plm = InMemoryPLM::open(temp_dir.path().join("join"))
-        .await
-        .unwrap();
-
-    let revoked_list = InMemoryRevokedList::open(temp_dir.path().join("join"))
-        .await
-        .unwrap();
+    let plm = InMemoryPLM::open("").await.unwrap();
+    let revoked_list = InMemoryRevokedList::open("").await.unwrap();
 
     let (_, skm) = DGSP::keygen_manager().unwrap();
 
@@ -64,14 +58,16 @@ async fn setup_in_memory_revoke() -> InMemorySetup {
 
 #[cfg(feature = "in-disk")]
 async fn setup_in_disk_revoke() -> InDiskSetup {
-    let project_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let temp_dir = Builder::new()
+    let project_root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let temp_dir = tempfile::Builder::new()
         .prefix("temp_example_db_")
         .tempdir_in(&project_root)
         .expect("Failed to create temporary directory in project root");
 
-    let plm = InDiskPLM::open(temp_dir.path().join("join")).await.unwrap();
-    let revoked_list = InDiskRevokedList::open(temp_dir.path().join("join"))
+    let plm = InDiskPLM::open(temp_dir.path().join(ALG_NAME))
+        .await
+        .unwrap();
+    let revoked_list = InDiskRevokedList::open(temp_dir.path().join(ALG_NAME))
         .await
         .unwrap();
 
@@ -86,11 +82,13 @@ async fn setup_in_disk_revoke() -> InDiskSetup {
         skm,
         revoked_list,
         plm,
+        temp_dir,
     }
 }
 
 fn revoke_benchmarks(c: &mut Criterion) {
-    let mut group = c.benchmark_group("DGSP revoke only");
+    let mut group = c.benchmark_group(format!("DGSP_{}", ALG_NAME));
+    group.sample_size(10);
 
     #[cfg(feature = "in-memory")]
     {
@@ -102,11 +100,11 @@ fn revoke_benchmarks(c: &mut Criterion) {
             plm,
         } = setup_data;
 
-        let counter = AtomicU64::new(0);
+        let counter = AtomicU64::new(GROUP_SIZE);
 
         group.bench_function(
             BenchmarkId::new(
-                "revoke_in_memory",
+                format!("{}_in_memory", ALG_NAME),
                 format!(
                     "(GROUP_SIZE={}, CERTIFICATE_ISSUED_SIZE={})",
                     GROUP_SIZE, CERTIFICATE_ISSUED_SIZE
@@ -152,8 +150,8 @@ fn revoke_benchmarks(c: &mut Criterion) {
                         // Stop timer
                         total += start.elapsed();
 
-                        // Check result for errors (optional)
-                        result.expect("Revoke operation failed");
+                        // Check result for errors
+                        result.expect("Revoke failed");
                     }
 
                     total
@@ -170,13 +168,14 @@ fn revoke_benchmarks(c: &mut Criterion) {
             skm,
             revoked_list,
             plm,
+            temp_dir,
         } = setup_data;
 
-        let counter = AtomicU64::new(0);
+        let counter = AtomicU64::new(GROUP_SIZE);
 
         group.bench_function(
             BenchmarkId::new(
-                "revoke_in_disk",
+                format!("{}_in_disk", ALG_NAME),
                 format!(
                     "(GROUP_SIZE={}, CERTIFICATE_ISSUED_SIZE={})",
                     GROUP_SIZE, CERTIFICATE_ISSUED_SIZE
@@ -188,8 +187,7 @@ fn revoke_benchmarks(c: &mut Criterion) {
 
                     for _ in 0..num_iters {
                         // Precomputation
-                        let idx = counter.fetch_add(1, Ordering::Relaxed);
-                        let username = format!("user_{}", idx);
+                        let username = counter.fetch_add(1, Ordering::Relaxed).to_string();
                         let (id, cid) = FuturesExecutor
                             .block_on(DGSP::join(&skm.msk, &username, &plm))
                             .unwrap();
@@ -213,24 +211,33 @@ fn revoke_benchmarks(c: &mut Criterion) {
                         let start = Instant::now();
 
                         // Revoke benchmark
-                        let result = FuturesExecutor.block_on(DGSP::revoke(
+                        let result = black_box(FuturesExecutor.block_on(DGSP::revoke(
                             &skm.msk,
                             &plm,
                             vec![id],
                             &revoked_list,
-                        ));
+                        )));
 
                         // Stop timer
                         total += start.elapsed();
 
-                        // Check result for errors (optional)
-                        result.expect("Revoke operation failed");
+                        // Check result for errors
+                        result.expect("Revocation failed");
                     }
 
                     total
                 });
             },
         );
+        let plm_usage = db_logical_size(&plm, &temp_dir, "PLM", ALG_NAME);
+        println!("{}", plm_usage);
+
+        let revoked_list_usage = db_logical_size(&plm, &temp_dir, "RevokedList", ALG_NAME);
+        println!("{}", revoked_list_usage);
+
+        if KEEP_CREATED_DATABASES {
+            let _ = temp_dir.into_path();
+        }
     }
 
     group.finish();
