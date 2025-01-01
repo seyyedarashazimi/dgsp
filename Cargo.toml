@@ -30,6 +30,10 @@ opt-level = 3
 debug = false
 
 [[bench]]
+name = "dgsp_keygen"
+harness = false
+
+[[bench]]
 name = "dgsp_join"
 harness = false
 
