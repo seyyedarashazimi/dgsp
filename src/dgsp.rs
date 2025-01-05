@@ -23,6 +23,7 @@ pub use crate::{InDiskPLM, InDiskRevokedList};
 pub use crate::{InMemoryPLM, InMemoryRevokedList};
 
 /// wots_sgn_seed is pk_seed of W-OTS+
+#[cfg_attr(feature = "serialization", derive(Serialize, Deserialize))]
 #[derive(Clone, Zeroize)]
 pub struct DGSPWotsRand {
     wots_adrs_rand: [u8; WTS_ADRS_RAND_BYTES],
@@ -50,19 +51,23 @@ impl DGSPWotsRand {
 
 array_struct!(DGSPMSK, DGSP_N);
 
+#[cfg_attr(feature = "serialization", derive(Serialize, Deserialize))]
 #[derive(Clone, Zeroize)]
 pub struct DGSPManagerSecretKey {
     pub msk: DGSPMSK,
     pub spx_sk: SphincsPlusSecretKey,
 }
 
+#[cfg_attr(feature = "serialization", derive(Serialize, Deserialize))]
 #[derive(Clone, Zeroize)]
 pub struct DGSPManagerPublicKey {
     pub spx_pk: SphincsPlusPublicKey,
 }
 
+#[cfg_attr(feature = "serialization", derive(Serialize, Deserialize))]
 #[derive(Clone, Zeroize)]
 pub struct DGSPSignature {
+    #[cfg_attr(feature = "serialization", serde(with = "BigArray"))]
     pub wots_sig: [u8; SPX_WOTS_BYTES],
     pub pos: [u8; DGSP_POS_BYTES],
     pub spx_sig: SphincsPlusSignature,
@@ -266,7 +271,7 @@ impl DGSP {
     ///   n *     n     *  16  *   m
     pub fn sign(
         message: &[u8],
-        wots_rand: &DGSPWotsRand,
+        wots_rand: DGSPWotsRand,
         seed_user: &[u8; SPX_N],
         cert: ([u8; DGSP_POS_BYTES], SphincsPlusSignature),
     ) -> DGSPSignature {
@@ -286,7 +291,7 @@ impl DGSP {
             wots_sig,
             pos: cert.0,
             spx_sig: cert.1,
-            wots_rand: wots_rand.clone(),
+            wots_rand,
         }
     }
 
@@ -387,7 +392,7 @@ mod tests {
 
         let wots_rand = wots_rands.pop().unwrap();
         let cert = certs.pop().unwrap();
-        let sig = DGSP::sign(&message, &wots_rand, &seed_u1, cert);
+        let sig = DGSP::sign(&message, wots_rand, &seed_u1, cert);
 
         // Verify the signature
         DGSP::verify(&message, &sig, &revoked_list, &pkm)
@@ -421,7 +426,7 @@ mod tests {
         let wots_rand_new = wots_rands.pop().unwrap();
         let cert_new = certs.pop().unwrap();
         let message_new = (0..len).map(|_| rng.gen::<u8>()).collect::<Vec<_>>();
-        let sig_new = DGSP::sign(&message_new, &wots_rand_new, &seed_u1, cert_new);
+        let sig_new = DGSP::sign(&message_new, wots_rand_new, &seed_u1, cert_new);
         assert_eq!(
             DGSP::verify(&message_new, &sig_new, &revoked_list, &pkm).await,
             Err(Error::VerificationFailed(
@@ -477,7 +482,7 @@ mod tests {
 
         let wots_rand = wots_rands.pop().unwrap();
         let cert = certs.pop().unwrap();
-        let sig = DGSP::sign(&message, &wots_rand, &seed_u1, cert);
+        let sig = DGSP::sign(&message, wots_rand, &seed_u1, cert);
 
         // Verify the signature
         DGSP::verify(&message, &sig, &revoked_list, &pkm)
@@ -511,7 +516,7 @@ mod tests {
         let wots_rand_new = wots_rands.pop().unwrap();
         let cert_new = certs.pop().unwrap();
         let message_new = (0..len).map(|_| rng.gen::<u8>()).collect::<Vec<_>>();
-        let sig_new = DGSP::sign(&message_new, &wots_rand_new, &seed_u1, cert_new);
+        let sig_new = DGSP::sign(&message_new, wots_rand_new, &seed_u1, cert_new);
         assert_eq!(
             DGSP::verify(&message_new, &sig_new, &revoked_list, &pkm).await,
             Err(Error::VerificationFailed(

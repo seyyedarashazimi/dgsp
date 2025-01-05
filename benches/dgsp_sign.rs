@@ -100,7 +100,7 @@ fn sign_benchmarks(c: &mut Criterion) {
                         let start = Instant::now();
 
                         // Benchmark
-                        black_box(DGSP::sign(&message, &wots_rand, &seed_u, cert));
+                        black_box(DGSP::sign(&message, wots_rand, &seed_u, cert));
 
                         // Stop timer
                         total += start.elapsed();
@@ -150,7 +150,7 @@ fn sign_benchmarks(c: &mut Criterion) {
                     let start = Instant::now();
 
                     // Benchmark
-                    black_box(DGSP::sign(&message, &wots_rand, &seed_u, cert));
+                    black_box(DGSP::sign(&message, wots_rand, &seed_u, cert));
 
                     // Stop timer
                     total += start.elapsed();

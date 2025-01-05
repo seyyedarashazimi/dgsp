@@ -15,11 +15,11 @@ use tempfile::TempDir;
 
 mod bench_utils;
 
-const GROUP_SIZE: u64 = 1 << 10;
+const GROUP_SIZE: u64 = 1 << 20;
 
 // Set the following to be true if you want to keep the temporarily-created databases
 // for further inspections.
-const KEEP_CREATED_DATABASES: bool = false;
+const KEEP_CREATED_DATABASES: bool = true;
 
 static ALG_NAME: &str = "join";
 

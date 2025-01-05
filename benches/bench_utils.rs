@@ -1,11 +1,15 @@
 #![allow(unused)]
 use criterion::black_box;
-use dgsp::dgsp::{DGSPManagerSecretKey, DGSP};
+use dgsp::dgsp::{DGSPManagerSecretKey, DGSP, DGSPMSK};
+use dgsp::params::DGSP_N;
 use dgsp::{InDiskPLM, InMemoryPLM, PLMInterface};
 use rayon::prelude::*;
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use tempfile::TempDir;
+
+pub const MSK: [u8; DGSP_N] = [170_u8; DGSP_N]; // 0xAA
+const GROUP_SIZE: u64 = 1 << 20;
 
 pub fn db_logical_size<P: AsRef<Path>>(db: &sled::Db, path: P, db_type: &str, alg: &str) -> String {
     db.flush().unwrap();
@@ -65,58 +69,28 @@ pub fn format_size(bytes: u64) -> String {
         format!("{} Bytes", bytes)
     }
 }
-//
-// #[cfg(feature = "in-memory")]
-// pub struct InMemorySetup {
-//     pub skm: DGSPManagerSecretKey,
-//     pub plm: InMemoryPLM,
-// }
-//
-// #[cfg(feature = "in-disk")]
-// pub struct InDiskSetup {
-//     pub skm: DGSPManagerSecretKey,
-//     pub plm: InDiskPLM,
-//     pub temp_dir: TempDir,
-// }
-//
-// #[cfg(feature = "in-memory")]
-// pub async fn setup_in_memory(group_size: u64) -> InMemorySetup {
-//     let plm = InMemoryPLM::open("").await.unwrap();
-//     let (_, skm) = DGSP::keygen_manager().unwrap();
-//
-//     // populate group with initial users
-//     for u in 0..group_size {
-//         DGSP::join(&skm.msk, &u.to_string(), &plm).await.unwrap();
-//     }
-//
-//     InMemorySetup { skm, plm }
-// }
-//
-// #[cfg(feature = "in-disk")]
-// pub async fn setup_in_disk(group_size: u64, alg: &str) -> InDiskSetup {
-//     let project_root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-//     let temp_dir = tempfile::Builder::new()
-//         .prefix("temp_example_db_")
-//         .tempdir_in(&project_root)
-//         .expect("Failed to create temporary directory in project root");
-//
-//     let plm = InDiskPLM::open(temp_dir.path().join(alg)).await.unwrap();
-//     let (_, skm) = DGSP::keygen_manager().unwrap();
-//
-//     // populate group with initial users
-//     for u in 0..group_size {
-//         DGSP::join(&skm.msk, &u.to_string(), &plm).await.unwrap();
-//     }
-//
-//     InDiskSetup { skm, plm, temp_dir }
-// }
-//
-// pub fn plm_show_keep(plm: &InDiskPLM, temp_dir: TempDir, alg: &str, keep: bool) {
-//     let plm_usage = db_logical_size(plm, &temp_dir, "PLM", alg);
-//     println!("{}", plm_usage);
-//
-//     // keep temp directory if requested
-//     if keep {
-//         let _ = temp_dir.into_path();
-//     }
-// }
+
+#[cfg(feature = "in-disk")]
+pub async fn initialize_plm_with_users(group_size: u64) -> InDiskPLM {
+    let path = PathBuf::from(format!("plm_for_{}_users", group_size));
+    let plm = InDiskPLM::open(path).await.unwrap();
+
+    // populate group with initial users
+    for u in 0..group_size {
+        DGSP::join(&DGSPMSK::from(MSK), &u.to_string(), &plm)
+            .await
+            .unwrap();
+    }
+
+    plm
+}
+
+pub fn plm_show_keep(plm: &InDiskPLM, temp_dir: TempDir, alg: &str, keep: bool) {
+    let plm_usage = db_logical_size(plm, &temp_dir, "PLM", alg);
+    println!("{}", plm_usage);
+
+    // keep temp directory if requested
+    if keep {
+        let _ = temp_dir.into_path();
+    }
+}

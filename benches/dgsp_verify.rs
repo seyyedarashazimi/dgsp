@@ -140,7 +140,7 @@ fn verify_benchmarks(c: &mut Criterion) {
                         let wots_rand = wots_rands.pop().unwrap();
                         let cert = certs.pop().unwrap();
                         OsRng.fill_bytes(&mut message);
-                        let sig = DGSP::sign(&message, &wots_rand, &seed_u, cert);
+                        let sig = DGSP::sign(&message, wots_rand, &seed_u, cert);
 
                         // Start timer
                         let start = Instant::now();
@@ -212,7 +212,7 @@ fn verify_benchmarks(c: &mut Criterion) {
                         let wots_rand = wots_rands.pop().unwrap();
                         let cert = certs.pop().unwrap();
                         OsRng.fill_bytes(&mut message);
-                        let sig = DGSP::sign(&message, &wots_rand, &seed_u, cert);
+                        let sig = DGSP::sign(&message, wots_rand, &seed_u, cert);
 
                         // Start timer
                         let start = Instant::now();

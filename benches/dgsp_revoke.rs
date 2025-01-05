@@ -15,8 +15,8 @@ use tempfile::TempDir;
 
 mod bench_utils;
 
-const GROUP_SIZE: u64 = 1 << 10;
-const CERTIFICATE_ISSUED_SIZE: usize = 1 << 1;
+const GROUP_SIZE: u64 = 1 << 23;
+const CERTIFICATE_ISSUED_SIZE: usize = 1 << 0;
 
 const KEEP_CREATED_DATABASES: bool = true;
 
