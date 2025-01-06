@@ -1,3 +1,5 @@
+//! # DGSP...
+
 use crate::db::{PLMInterface, RevokedListInterface};
 use crate::hash::DGSPHasher;
 use crate::params::{DGSP_N, DGSP_POS_BYTES};
@@ -438,22 +440,11 @@ mod tests {
     #[tokio::test]
     #[cfg(feature = "in-memory")]
     async fn test_dgsp_in_memory() {
-        // Create a temporary directory for test in the project root
-        let project_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-        let temp_dir = Builder::new()
-            .prefix("temp_example_db_")
-            .tempdir_in(&project_root)
-            .expect("Failed to create temporary directory in project root");
-
         // Create PL_M
-        let plm = InMemoryPLM::open(temp_dir.path().join("dgsp"))
-            .await
-            .unwrap();
+        let plm = InMemoryPLM::open("").await.unwrap();
 
         // Create manager keys
-        let revoked_list = InMemoryRevokedList::open(temp_dir.path().join("dgsp"))
-            .await
-            .unwrap();
+        let revoked_list = InMemoryRevokedList::open("").await.unwrap();
 
         // Create manager keys
         let (pkm, skm) = DGSP::keygen_manager().unwrap();

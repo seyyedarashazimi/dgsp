@@ -8,9 +8,6 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use tempfile::TempDir;
 
-pub const MSK: [u8; DGSP_N] = [170_u8; DGSP_N]; // 0xAA
-const GROUP_SIZE: u64 = 1 << 20;
-
 pub fn db_logical_size<P: AsRef<Path>>(db: &sled::Db, path: P, db_type: &str, alg: &str) -> String {
     db.flush().unwrap();
     let dir = match db_type {
@@ -68,21 +65,6 @@ pub fn format_size(bytes: u64) -> String {
     } else {
         format!("{} Bytes", bytes)
     }
-}
-
-#[cfg(feature = "in-disk")]
-pub async fn initialize_plm_with_users(group_size: u64) -> InDiskPLM {
-    let path = PathBuf::from(format!("plm_for_{}_users", group_size));
-    let plm = InDiskPLM::open(path).await.unwrap();
-
-    // populate group with initial users
-    for u in 0..group_size {
-        DGSP::join(&DGSPMSK::from(MSK), &u.to_string(), &plm)
-            .await
-            .unwrap();
-    }
-
-    plm
 }
 
 pub fn plm_show_keep(plm: &InDiskPLM, temp_dir: TempDir, alg: &str, keep: bool) {

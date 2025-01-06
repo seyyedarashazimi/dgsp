@@ -24,6 +24,7 @@ sled = { version = "0.34", optional = true }
 criterion = { version = "0.5.1", features = ["async_futures"] }
 tempfile = { version = "3.14" }
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+futures = { version = "0.3.31" }
 
 [profile.bench]
 opt-level = 3
@@ -61,6 +62,10 @@ harness = false
 name = "dgsp_revoke"
 harness = false
 
+[[bench]]
+name = "dgsp_full_in_disk"
+harness = false
+
 [features]
 in-disk = ["sled", "bincode", "serialization"]
 in-memory = []
@@ -81,4 +86,4 @@ sphincs_shake_192s = ["sha3"]
 sphincs_shake_256f = ["sha3"]
 sphincs_shake_256s = ["sha3"]
 
-default = ["sphincs_shake_128f", "serialization", "in-disk", "in-memory"]
+default = ["sphincs_shake_256f", "serialization", "in-disk", "in-memory"]

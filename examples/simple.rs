@@ -1,18 +1,20 @@
 #![cfg(any(feature = "in-memory", feature = "in-disk"))]
 
 use dgsp::dgsp::DGSP;
-use dgsp::{Error, PLMInterface, RevokedListInterface};
-use std::path::PathBuf;
+use dgsp::{PLMInterface, RevokedListInterface};
 
-use dgsp::VerificationError::RevokedSignature;
-#[cfg(feature = "in-disk")]
-use dgsp::{InDiskPLM, InDiskRevokedList};
 #[cfg(feature = "in-memory")]
 use dgsp::{InMemoryPLM, InMemoryRevokedList};
+
+// Uncomment the next 3 lines if you want to use in-disk version of database.
+// use std::path::PathBuf;
+// #[cfg(feature = "in-disk")]
+// use dgsp::{InDiskPLM, InDiskRevokedList};
 
 // Replace this with in-disk if you want to use in-disk features
 #[cfg(feature = "in-memory")]
 async fn simple_dgsp() {
+    println!("DGSP Manager log:");
     // Choose a path for PLM and RevokedList database storage
     // As an example, we choose the project directory and create a database path.
     // Note that it is only needed for in-disk db, so uncomment it if you want an in-disk db.
@@ -28,15 +30,22 @@ async fn simple_dgsp() {
     // The in-disk RevokedList.
     // let revoked_list = InDiskRevokedList::open(&path).await.unwrap();
 
+    println!("DGSP PLM and RevokedList launched successfully.");
+
     // Note that plm and revoked_list can have different storage types
     // and still work  perfectly fine with each other.
 
     // Create manager key pair:
     let (pkm, skm) = DGSP::keygen_manager().unwrap();
+    println!("Constructed PublicKey and SecretKey pair for the manager.");
 
     // Now a user chooses a username and requests to join DGSP scheme.
     let username = "DGSP User 1";
     let (id, cid) = DGSP::join(&skm.msk, username, &plm).await.unwrap();
+    println!(
+        "User with username:{:?} joined DGSP with id:{}.",
+        username, id
+    );
 
     // The user then runs their keygen to obtain a private seed.
     let seed_u = DGSP::keygen_user();
@@ -49,6 +58,11 @@ async fn simple_dgsp() {
     let mut certs = DGSP::req_cert(&skm.msk, id, cid, &wots_pks, &plm, &skm.spx_sk)
         .await
         .unwrap();
+    println!(
+        "Created {} new certificates for {:?}, requested by the user.",
+        certs.len(),
+        username
+    );
 
     // After receiving certificates, user can sign an arbitrary message.
     let cert = certs.pop().unwrap();
@@ -57,19 +71,27 @@ async fn simple_dgsp() {
     let sig1 = DGSP::sign(msg1, wots_rand, &seed_u, cert);
 
     // Now having the public information, one can verify the user's signature:
-    assert_eq!(DGSP::verify(msg1, &sig1, &revoked_list, &pkm).await, Ok(()));
-    // By receiving no error, one can make sure the sig1 is valid signature of msg1.
+    println!(
+        "Verification status of the first signature of {:?}: {:?}.",
+        username,
+        DGSP::verify(msg1, &sig1, &revoked_list, &pkm).await
+    );
+    // By receiving no error, one can make sure the sig1 is a valid signature for msg1.
 
     // Now user creates another signature:
     let cert = certs.pop().unwrap();
     let wots_rand = wots_rands.pop().unwrap();
     let msg2 = "I am still DGSP User 1 and this is my second message. :)".as_bytes();
     let sig2 = DGSP::sign(msg2, wots_rand, &seed_u, cert);
-    assert_eq!(DGSP::verify(msg2, &sig2, &revoked_list, &pkm).await, Ok(()));
+    println!(
+        "Verification status of the second signature of {:?}: {:?}.",
+        username,
+        DGSP::verify(msg2, &sig2, &revoked_list, &pkm).await
+    );
 
     // The user then wants to sign again.
     let cert = certs.pop();
-    assert!(cert.is_none());
+    println!("Remained certificates for {:?}: {:?}.", username, cert);
     // Oh, no! No certificates remained for the user.
 
     // User then asks for a few more certificates from the DGSP manager.
@@ -77,19 +99,31 @@ async fn simple_dgsp() {
     let mut certs = DGSP::req_cert(&skm.msk, id, cid, &wots_pks, &plm, &skm.spx_sk)
         .await
         .unwrap();
+    println!(
+        "Created {} new certificates for {:?}, requested by the user.",
+        certs.len(),
+        username
+    );
 
     // Now user can continue signing messages.
     let cert = certs.pop().unwrap();
     let wots_rand = wots_rands.pop().unwrap();
     let msg3 = "I am yet again DGSP User 1 and this is my third message. ciao!".as_bytes();
     let sig3 = DGSP::sign(msg3, wots_rand, &seed_u, cert);
-    assert_eq!(DGSP::verify(msg3, &sig3, &revoked_list, &pkm).await, Ok(()));
+    println!(
+        "Verification status of the third signature of {:?}: {:?}.",
+        username,
+        DGSP::verify(msg3, &sig3, &revoked_list, &pkm).await
+    );
 
     // The DGSP manager then decides to open sig3 to see who has signed it.
     let (signer_id, signer_username) = DGSP::open(&skm.msk, &plm, &sig3).await.unwrap();
+    println!("Manager opened third signature to find who has signed it:");
+    println!(
+        "   signer_username:{:?}, signer_id:{}.",
+        signer_username, signer_id
+    );
     // Oh hey, it is "DGSP User 1"!
-    assert_eq!(signer_id, id);
-    assert_eq!(signer_username, username);
 
     // After a while, user membership in the group expires
     // and as so, manager decides to revoke its membership
@@ -97,29 +131,39 @@ async fn simple_dgsp() {
     DGSP::revoke(&skm.msk, &plm, vec![id], &revoked_list)
         .await
         .unwrap();
+    println!("User {:?} is revoked from now on.", username);
 
     // After that, the user's previous signatures will no longer be verified.
-    assert_eq!(
-        DGSP::verify(msg1, &sig1, &revoked_list, &pkm).await,
-        Err(Error::VerificationFailed(RevokedSignature))
+    println!(
+        "Verification status of the first  signature of {:?} after revocation: {:?}.",
+        username,
+        DGSP::verify(msg1, &sig1, &revoked_list, &pkm).await
     );
-    assert_eq!(
-        DGSP::verify(msg2, &sig2, &revoked_list, &pkm).await,
-        Err(Error::VerificationFailed(RevokedSignature))
+    println!(
+        "Verification status of the second signature of {:?} after revocation: {:?}.",
+        username,
+        DGSP::verify(msg2, &sig2, &revoked_list, &pkm).await
     );
-    assert_eq!(
-        DGSP::verify(msg3, &sig3, &revoked_list, &pkm).await,
-        Err(Error::VerificationFailed(RevokedSignature))
+    println!(
+        "Verification status of the third  signature of {:?} after revocation: {:?}.",
+        username,
+        DGSP::verify(msg3, &sig3, &revoked_list, &pkm).await
     );
 
     // And user can no longer create valid signatures using the remaining certificates:
+    let cert = certs.pop().unwrap();
+    let wots_rand = wots_rands.pop().unwrap();
+    let msg4 = "This is DGSP User 1 and I am trying to sign even after being revoked!".as_bytes();
+    let sig4 = DGSP::sign(msg4, wots_rand, &seed_u, cert);
+    println!(
+        "Verification status of the a new signature signed by {:?} after revocation: {:?}.",
+        username,
+        DGSP::verify(msg4, &sig4, &revoked_list, &pkm).await
+    );
 }
 
-#[tokio::main(flavor = "current_thread")]
+#[tokio::main]
 async fn main() {
-    // #[cfg(feature = "in-memory")]
-    // verify_in_memory_benchmark().await;
-    //
-    // #[cfg(feature = "in-disk")]
-    // verify_in_disk_benchmark().await;
+    #[cfg(feature = "in-memory")]
+    simple_dgsp().await;
 }

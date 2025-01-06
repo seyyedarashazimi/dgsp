@@ -8,7 +8,7 @@ fn csr_benchmarks(c: &mut Criterion) {
     {
         group.bench_function(BenchmarkId::new(alg_name, ""), |b| {
             b.iter(|| {
-                black_box(DGSP::keygen_user());
+                black_box(DGSP::keygen_manager()).unwrap();
             });
         });
     }

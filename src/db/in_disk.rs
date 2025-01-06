@@ -60,6 +60,7 @@ struct InDiskPLMEntry {
 /// Private List of the Manager in the DGSP scheme. It is responsible for storing and updating
 /// username of each user, user activity status, and the number of issued certificates created
 /// for each user.
+#[derive(Debug, Clone)]
 pub struct InDiskPLM {
     db: sled::Db,
     plme_tree: sled::Tree,
