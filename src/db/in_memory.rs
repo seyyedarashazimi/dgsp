@@ -127,6 +127,34 @@ impl PLMInterface for InMemoryPLM {
     }
 }
 
+#[cfg(feature = "benchmarking")]
+#[doc(hidden)]
+impl InMemoryPLM {
+    #[cfg(feature = "benchmarking")]
+    #[doc(hidden)]
+    pub fn delete_sequential_usernames_to_the_end(
+        &self,
+        start_id: u64,
+    ) -> Result<(), crate::Error> {
+        let mut data = self.data.lock()?;
+
+        let last_id = data.vec.len();
+
+        if (last_id as u64) < start_id {
+            return Err(crate::Error::DbInternalError(format!(
+                "given id:{start_id} is not in the database."
+            )));
+        }
+
+        for u in ((start_id as usize)..last_id).rev() {
+            data.vec.pop().unwrap();
+            data.set.remove(&u.to_string());
+        }
+
+        Ok(())
+    }
+}
+
 /// RevokedList is a public list containing the DGSP.pos values to show which signatures and issued
 /// certificates are revoked.
 #[derive(Default)]

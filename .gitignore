@@ -6,3 +6,4 @@ Cargo.lock
 /database
 /test_db
 temp_example_db_*
+dgsp_sphincs_*

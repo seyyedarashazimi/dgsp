@@ -333,13 +333,17 @@ mod tests {
     use super::*;
     use rand::distributions::Alphanumeric;
     use rand::{thread_rng, Rng};
-    use std::path::PathBuf;
-    use tempfile::Builder;
 
     #[cfg(feature = "in-disk")]
     use crate::db::in_disk::{InDiskPLM, InDiskRevokedList};
     #[cfg(feature = "in-memory")]
     use crate::db::in_memory::{InMemoryPLM, InMemoryRevokedList};
+
+    #[cfg(feature = "in-disk")]
+    use std::path::PathBuf;
+
+    #[cfg(feature = "in-disk")]
+    use tempfile::Builder;
 
     fn random_str(length: usize) -> String {
         thread_rng()

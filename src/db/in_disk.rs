@@ -234,6 +234,43 @@ impl PLMInterface for InDiskPLM {
     }
 }
 
+#[cfg(feature = "benchmarking")]
+#[doc(hidden)]
+impl InDiskPLM {
+    #[cfg(feature = "benchmarking")]
+    #[doc(hidden)]
+    pub fn delete_sequential_usernames_to_the_end(
+        &self,
+        start_id: u64,
+    ) -> Result<(), crate::Error> {
+        self.db.flush()?;
+        (&self.plme_tree, &self.name_tree, &self.meta_tree).transaction(
+            |(ptree, ntree, mtree)| {
+                let last_id = match mtree.get(NEXT_ID_KEY)? {
+                    Some(id_bytes) => bytes_to_u64(&id_bytes),
+                    None => 0u64,
+                };
+
+                if last_id < start_id {
+                    return Err(sled::transaction::ConflictableTransactionError::Abort(
+                        format!("Given id:{start_id} is not in the database."),
+                    ));
+                }
+
+                for u in (start_id..last_id).rev() {
+                    ptree.remove(&u.to_be_bytes())?;
+                    ntree.remove(u.to_string().as_bytes())?;
+                }
+
+                mtree.insert(NEXT_ID_KEY, &u64_to_bytes(start_id))?;
+
+                Ok(())
+            },
+        )?;
+        Ok(())
+    }
+}
+
 impl Deref for InDiskPLM {
     type Target = sled::Db;
 
@@ -241,13 +278,6 @@ impl Deref for InDiskPLM {
         &self.db
     }
 }
-
-// impl InDiskPLM {
-//     pub fn size_in_disk(&self) -> Result<u64, crate::Error> {
-//         self.db.flush()?;
-//         disk_usage(&self.path)
-//     }
-// }
 
 /// RevokedList is a public list containing the DGSP.pos values to show which signatures and issued
 /// certificates are revoked.

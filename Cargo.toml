@@ -31,39 +31,11 @@ opt-level = 3
 debug = false
 
 [[bench]]
-name = "dgsp_keygen"
-harness = false
-
-[[bench]]
-name = "dgsp_join"
-harness = false
-
-[[bench]]
-name = "dgsp_csr"
-harness = false
-
-[[bench]]
-name = "dgsp_cert"
-harness = false
-
-[[bench]]
-name = "dgsp_sign"
-harness = false
-
-[[bench]]
-name = "dgsp_verify"
-harness = false
-
-[[bench]]
-name = "dgsp_open"
-harness = false
-
-[[bench]]
-name = "dgsp_revoke"
-harness = false
-
-[[bench]]
 name = "dgsp_full_in_disk"
+harness = false
+
+[[bench]]
+name = "dgsp_full_in_memory"
 harness = false
 
 [features]
@@ -85,5 +57,6 @@ sphincs_shake_192f = ["sha3"]
 sphincs_shake_192s = ["sha3"]
 sphincs_shake_256f = ["sha3"]
 sphincs_shake_256s = ["sha3"]
+benchmarking = []
 
-default = ["sphincs_shake_256f", "serialization", "in-disk", "in-memory"]
+default = ["sphincs_shake_256f", "serialization", "in-disk", "in-memory", "benchmarking"]

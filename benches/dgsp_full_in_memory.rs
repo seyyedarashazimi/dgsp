@@ -1,16 +1,14 @@
-#![cfg(all(feature = "in-disk", feature = "benchmarking"))]
+#![cfg(all(feature = "in-memory", feature = "benchmarking"))]
 
 use crate::bench_utils::*;
 use criterion::async_executor::{AsyncExecutor, FuturesExecutor};
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
 use dgsp::dgsp::{DGSPManagerSecretKey, DGSP, DGSPMSK};
 use dgsp::params::DGSP_N;
-use dgsp::{InDiskPLM, InDiskRevokedList, PLMInterface, RevokedListInterface};
+use dgsp::{InMemoryPLM, InMemoryRevokedList, PLMInterface, RevokedListInterface};
 use rand::rngs::OsRng;
 use rand::RngCore;
 use rayon::ThreadPoolBuilder;
-use std::fs;
-use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
@@ -21,55 +19,35 @@ const GROUP_SIZE: u64 = 1 << 10;
 const CERTIFICATE_ISSUED_SIZE: usize = 1 << 0; // batch size
 const TWEAK_USERS_SIZE: u64 = 10;
 
-fn path() -> PathBuf {
-    PathBuf::from(format!(
-        "dgsp_{}_with_{}_users",
-        detect_spx_feature(),
-        GROUP_SIZE
-    ))
-}
+async fn initialize_plm_with_users() -> InMemoryPLM {
+    let plm = InMemoryPLM::open("").await.unwrap();
 
-async fn initialize_plm_with_users() -> InDiskPLM {
-    let path = path();
-    let db_preloaded = path.join("plm").exists();
-
-    let plm = InDiskPLM::open(path).await.unwrap();
-
-    if !db_preloaded {
-        // populate group with initial users in parallel
-        let tasks = (0..GROUP_SIZE).map(|u| {
-            let plm_ref = &plm;
-            async move {
-                DGSP::join(&DGSPMSK::from(MSK), &u.to_string(), plm_ref)
-                    .await
-                    .unwrap();
-            }
-        });
-        futures::future::join_all(tasks).await;
-    }
+    // populate group with initial users in parallel
+    let tasks = (0..GROUP_SIZE).map(|u| {
+        let plm_ref = &plm;
+        async move {
+            DGSP::join(&DGSPMSK::from(MSK), &u.to_string(), plm_ref)
+                .await
+                .unwrap();
+        }
+    });
+    futures::future::join_all(tasks).await;
 
     plm
 }
 
-fn reset_plm(plm: &InDiskPLM) {
+fn reset_plm(plm: &InMemoryPLM) {
     plm.delete_sequential_usernames_to_the_end(GROUP_SIZE)
-        .unwrap();
+        .unwrap()
 }
 
-fn delete_revoked_list(revoked_list: InDiskRevokedList) {
-    let path = path();
-    revoked_list.flush().unwrap();
-    if path.join("rl").exists() {
-        fs::remove_dir_all(path.join("rl")).unwrap();
-    }
+fn delete_revoked_list(_revoked_list: InMemoryRevokedList) {}
+
+async fn initialize_revoked_list() -> InMemoryRevokedList {
+    InMemoryRevokedList::open("").await.unwrap()
 }
 
-async fn initialize_revoked_list() -> InDiskRevokedList {
-    let path = path();
-    InDiskRevokedList::open(path).await.unwrap()
-}
-
-fn tweak_plm_rl(plm: &InDiskPLM, rl: &InDiskRevokedList, skm: &DGSPManagerSecretKey) {
+fn tweak_plm_rl(plm: &InMemoryPLM, rl: &InMemoryRevokedList, skm: &DGSPManagerSecretKey) {
     for u in GROUP_SIZE..(GROUP_SIZE + TWEAK_USERS_SIZE) {
         let (id, cid) = FuturesExecutor
             .block_on(DGSP::join(&skm.msk, &u.to_string(), plm))
@@ -117,7 +95,7 @@ fn dgsp_full_benchmarks(c: &mut Criterion) {
     let pool = ThreadPoolBuilder::new().num_threads(1).build().unwrap();
 
     let mut group = c.benchmark_group(format!(
-        "DGSP_in_disk_using_{}_with_{GROUP_SIZE}_users_and_{CERTIFICATE_ISSUED_SIZE}_batch",
+        "DGSP_in_memory_using_{}_with_{GROUP_SIZE}_users_and_{CERTIFICATE_ISSUED_SIZE}_batch",
         detect_spx_feature()
     ));
     group.sample_size(10);

@@ -35,4 +35,17 @@ for sphincs in "${sphincs_features[@]}"; do
   done
 done
 
+echo "Testing with default features"
+cargo build --verbose
+if [ $? -ne 0 ]; then
+  echo "Build failed for default features"
+  exit 1
+fi
+
+cargo test --verbose
+if [ $? -ne 0 ]; then
+  echo "Tests failed for default features"
+  exit 1
+fi
+
 echo "All combinations built and tested successfully!"
