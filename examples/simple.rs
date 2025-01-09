@@ -11,7 +11,8 @@ use std::path::PathBuf;
 
 #[cfg(feature = "in-memory")]
 async fn simple_dgsp_in_memory() {
-    println!("DGSP Manager log:");
+    println!("--------------------------------------");
+    println!("DGSP Manager log (in-memory database):");
     // Here we set PLM to store in-memory.
     let plm = InMemoryPLM::open("").await.unwrap();
 
@@ -152,7 +153,8 @@ async fn simple_dgsp_in_memory() {
 
 #[cfg(feature = "in-disk")]
 async fn simple_dgsp_in_disk() {
-    println!("DGSP Manager log:");
+    println!("------------------------------------");
+    println!("DGSP Manager log (in-disk database):");
     // Choose a path for PLM and RevokedList database storage
     // As an example, we choose the project directory and create a database path.
     let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("examples/simple_db");
@@ -173,8 +175,13 @@ async fn simple_dgsp_in_disk() {
     println!("Constructed PublicKey and SecretKey pair for the manager.");
 
     // Now a user chooses a username and requests to join DGSP scheme.
-    let username = "DGSP User 1";
+    let username = "DGSP User 2";
     let (id, cid) = DGSP::join(&skm.msk, username, &plm).await.unwrap();
+    // If the above line throws an Err(Error::UsernameAlreadyExists("<USERNAME>")) error, it means
+    // you have run this code previously and there already exists a user with the given <USERNAME>.
+    // So you can either remove the created database (default name is 'simple_db'), or choose
+    // another path for database, or choose a new username.
+
     println!(
         "User with username:{:?} joined DGSP with id:{}.",
         username, id

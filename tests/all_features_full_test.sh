@@ -21,13 +21,13 @@ storage_features=("in-disk" "in-memory")
 for sphincs in "${sphincs_features[@]}"; do
   for storage in "${storage_features[@]}"; do
     echo "Testing with features: $sphincs, $storage"
-    cargo build --no-default-features --features "$sphincs $storage" --verbose
+    cargo build --no-default-features --features "$sphincs $storage"
     if [ $? -ne 0 ]; then
       echo "Build failed for features: $sphincs, $storage"
       exit 1
     fi
 
-    cargo test --no-default-features --features "$sphincs $storage" --verbose
+    cargo test --no-default-features --features "$sphincs $storage"
     if [ $? -ne 0 ]; then
       echo "Tests failed for features: $sphincs, $storage"
       exit 1

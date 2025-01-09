@@ -54,9 +54,9 @@ macro_rules! array_struct {
 
         impl TryFrom<&[u8]> for $type {
             type Error = Error;
-            fn try_from(data: &[u8]) -> Result<$type, Error> {
+            fn try_from(data: &[u8]) -> Result<$type> {
                 if data.len() != $size {
-                    Err(Error::BadLength($size, data.len()))
+                    Err(Error::from(Error::BadLength($size, data.len())))
                 } else {
                     let mut array = [0u8; $size];
                     array.copy_from_slice(data);
@@ -66,12 +66,11 @@ macro_rules! array_struct {
         }
 
         impl PartialEq for $type {
-            /// By no means constant time comparison
             fn eq(&self, other: &Self) -> bool {
                 self.0
                     .iter()
                     .zip(other.0.iter())
-                    .try_for_each(|(a, b)| if a == b { Ok(()) } else { Err(()) })
+                    .try_for_each(|(x, y)| if x == y { Ok(()) } else { Err(()) })
                     .is_ok()
             }
         }

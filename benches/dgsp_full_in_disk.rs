@@ -9,7 +9,6 @@ use dgsp::{InDiskPLM, InDiskRevokedList, PLMInterface, RevokedListInterface};
 use rand::rngs::OsRng;
 use rand::RngCore;
 use rayon::ThreadPoolBuilder;
-use std::fs;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
@@ -56,17 +55,12 @@ fn reset_plm(plm: &InDiskPLM) {
         .unwrap();
 }
 
-fn delete_revoked_list(revoked_list: InDiskRevokedList) {
-    let path = path();
-    revoked_list.flush().unwrap();
-    if path.join("rl").exists() {
-        fs::remove_dir_all(path.join("rl")).unwrap();
-    }
+fn clear_revoked_list(revoked_list: &InDiskRevokedList) {
+    revoked_list.clear().expect("Failed to clear revoked_list");
 }
 
 async fn initialize_revoked_list() -> InDiskRevokedList {
-    let path = path();
-    InDiskRevokedList::open(path).await.unwrap()
+    InDiskRevokedList::open(path()).await.unwrap()
 }
 
 fn tweak_plm_rl(plm: &InDiskPLM, rl: &InDiskRevokedList, skm: &DGSPManagerSecretKey) {
@@ -106,14 +100,6 @@ fn dgsp_full_benchmarks(c: &mut Criterion) {
     let (pkm, mut skm) = DGSP::keygen_manager().unwrap();
     skm.msk = DGSPMSK::from(MSK);
 
-    println!("Resetting database...");
-    reset_plm(&plm);
-    delete_revoked_list(revoked_list);
-    let revoked_list = FuturesExecutor.block_on(initialize_revoked_list());
-    tweak_plm_rl(&plm, &revoked_list, &skm);
-
-    let counter = AtomicU64::new(GROUP_SIZE + TWEAK_USERS_SIZE);
-
     let pool = ThreadPoolBuilder::new().num_threads(1).build().unwrap();
 
     let mut group = c.benchmark_group(format!(
@@ -137,6 +123,13 @@ fn dgsp_full_benchmarks(c: &mut Criterion) {
             });
         });
     });
+
+    println!("Resetting database...");
+    reset_plm(&plm);
+    clear_revoked_list(&revoked_list);
+    tweak_plm_rl(&plm, &revoked_list, &skm);
+
+    let counter = AtomicU64::new(GROUP_SIZE + TWEAK_USERS_SIZE);
 
     group.bench_function("join", |b| {
         pool.install(|| {
@@ -165,13 +158,6 @@ fn dgsp_full_benchmarks(c: &mut Criterion) {
         });
     });
 
-    println!("Resetting database...");
-    reset_plm(&plm);
-    delete_revoked_list(revoked_list);
-    let revoked_list = FuturesExecutor.block_on(initialize_revoked_list());
-    tweak_plm_rl(&plm, &revoked_list, &skm);
-    let counter = AtomicU64::new(GROUP_SIZE + TWEAK_USERS_SIZE);
-
     group.bench_function("csr", |b| {
         pool.install(|| {
             b.iter_custom(|num_iters| {
@@ -194,6 +180,13 @@ fn dgsp_full_benchmarks(c: &mut Criterion) {
             });
         });
     });
+
+    println!("Resetting database...");
+    reset_plm(&plm);
+    clear_revoked_list(&revoked_list);
+    tweak_plm_rl(&plm, &revoked_list, &skm);
+
+    let counter = AtomicU64::new(GROUP_SIZE + TWEAK_USERS_SIZE);
 
     group.bench_function("cert", |b| {
         pool.install(|| {
@@ -238,8 +231,7 @@ fn dgsp_full_benchmarks(c: &mut Criterion) {
 
     println!("Resetting database...");
     reset_plm(&plm);
-    delete_revoked_list(revoked_list);
-    let revoked_list = FuturesExecutor.block_on(initialize_revoked_list());
+    clear_revoked_list(&revoked_list);
     tweak_plm_rl(&plm, &revoked_list, &skm);
     let counter = AtomicU64::new(GROUP_SIZE + TWEAK_USERS_SIZE);
 
@@ -289,8 +281,7 @@ fn dgsp_full_benchmarks(c: &mut Criterion) {
 
     println!("Resetting database...");
     reset_plm(&plm);
-    delete_revoked_list(revoked_list);
-    let revoked_list = FuturesExecutor.block_on(initialize_revoked_list());
+    clear_revoked_list(&revoked_list);
     tweak_plm_rl(&plm, &revoked_list, &skm);
     let counter = AtomicU64::new(GROUP_SIZE + TWEAK_USERS_SIZE);
 
@@ -349,8 +340,7 @@ fn dgsp_full_benchmarks(c: &mut Criterion) {
 
     println!("Resetting database...");
     reset_plm(&plm);
-    delete_revoked_list(revoked_list);
-    let revoked_list = FuturesExecutor.block_on(initialize_revoked_list());
+    clear_revoked_list(&revoked_list);
     tweak_plm_rl(&plm, &revoked_list, &skm);
     let counter = AtomicU64::new(GROUP_SIZE + TWEAK_USERS_SIZE);
 
@@ -405,8 +395,7 @@ fn dgsp_full_benchmarks(c: &mut Criterion) {
 
     println!("Resetting database...");
     reset_plm(&plm);
-    delete_revoked_list(revoked_list);
-    let revoked_list = FuturesExecutor.block_on(initialize_revoked_list());
+    clear_revoked_list(&revoked_list);
     tweak_plm_rl(&plm, &revoked_list, &skm);
     let counter = AtomicU64::new(GROUP_SIZE + TWEAK_USERS_SIZE);
 
@@ -460,9 +449,6 @@ fn dgsp_full_benchmarks(c: &mut Criterion) {
 
     println!("Resetting database...");
     reset_plm(&plm);
-    delete_revoked_list(revoked_list);
-    let revoked_list = FuturesExecutor.block_on(initialize_revoked_list());
-    tweak_plm_rl(&plm, &revoked_list, &skm);
 
     group.finish();
 }

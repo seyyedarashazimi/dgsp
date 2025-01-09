@@ -1,6 +1,7 @@
 use crate::db::{PLMInterface, RevokedListInterface};
 use crate::params::DGSP_POS_BYTES;
 use crate::utils::{bytes_to_u64, u64_to_bytes};
+use crate::Result;
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use sled::Transactional;
@@ -72,7 +73,7 @@ const NEXT_ID_KEY: &[u8] = b"__next_id";
 
 #[async_trait]
 impl PLMInterface for InDiskPLM {
-    async fn open<P>(path: P) -> Result<Self, crate::Error>
+    async fn open<P>(path: P) -> Result<Self>
     where
         P: AsRef<Path> + Send,
     {
@@ -93,7 +94,7 @@ impl PLMInterface for InDiskPLM {
     ///
     /// Returns `Ok(id)` if newly added. Otherwise, throws an `crate::errors::Error` error if given
     /// username already existed, or if an error occurs.
-    async fn add_new_user<S>(&self, username: S) -> Result<u64, crate::Error>
+    async fn add_new_user<S>(&self, username: S) -> Result<u64>
     where
         S: AsRef<str> + Display + Send,
     {
@@ -133,7 +134,7 @@ impl PLMInterface for InDiskPLM {
     }
 
     /// Deactivate a user by ID
-    async fn deactivate_id(&self, id: u64) -> Result<(), crate::Error> {
+    async fn deactivate_id(&self, id: u64) -> Result<()> {
         let id_key = u64_to_bytes(id);
         self.plme_tree.transaction(|ptree| {
             let val = ptree.get(id_key)?;
@@ -155,7 +156,7 @@ impl PLMInterface for InDiskPLM {
     }
 
     /// Get counter of created certificates for a given user ID
-    async fn get_ctr_id(&self, id: u64) -> Result<u64, crate::Error> {
+    async fn get_ctr_id(&self, id: u64) -> Result<u64> {
         let id_key = u64_to_bytes(id);
         if let Some(val) = self.plme_tree.get(id_key)? {
             let entry: InDiskPLMEntry = bincode::deserialize(&val)
@@ -167,7 +168,7 @@ impl PLMInterface for InDiskPLM {
     }
 
     /// Get username by ID
-    async fn get_username(&self, id: u64) -> Result<String, crate::Error> {
+    async fn get_username(&self, id: u64) -> Result<String> {
         let id_key = u64_to_bytes(id);
         if let Some(val) = self.plme_tree.get(id_key)? {
             let entry: InDiskPLMEntry = bincode::deserialize(&val)
@@ -179,7 +180,7 @@ impl PLMInterface for InDiskPLM {
     }
 
     /// Check if ID exists
-    async fn id_exists(&self, id: u64) -> Result<bool, crate::Error> {
+    async fn id_exists(&self, id: u64) -> Result<bool> {
         let id_key = u64_to_bytes(id);
         if self.plme_tree.get(id_key)?.is_some() {
             Ok(true)
@@ -189,7 +190,7 @@ impl PLMInterface for InDiskPLM {
     }
 
     /// Check if ID is active
-    async fn id_is_active(&self, id: u64) -> Result<bool, crate::Error> {
+    async fn id_is_active(&self, id: u64) -> Result<bool> {
         let id_key = u64_to_bytes(id);
         if let Some(val) = self.plme_tree.get(id_key)? {
             let entry: InDiskPLMEntry = bincode::deserialize(&val)
@@ -205,7 +206,7 @@ impl PLMInterface for InDiskPLM {
     /// Returns `Ok(id)` if request is valid and no error occurs. Otherwise, throws an
     /// `crate::errors::Error` error if current ctr_cert value of the ID plus `add` value exceeds
     /// [`u64::MAX`] bound.
-    async fn increment_ctr_id_by(&self, id: u64, add: u64) -> Result<(), crate::Error> {
+    async fn increment_ctr_id_by(&self, id: u64, add: u64) -> Result<()> {
         let id_key = u64_to_bytes(id);
         self.plme_tree.transaction(|ptree| {
             if let Some(val) = ptree.get(id_key)? {
@@ -239,10 +240,7 @@ impl PLMInterface for InDiskPLM {
 impl InDiskPLM {
     #[cfg(feature = "benchmarking")]
     #[doc(hidden)]
-    pub fn delete_sequential_usernames_to_the_end(
-        &self,
-        start_id: u64,
-    ) -> Result<(), crate::Error> {
+    pub fn delete_sequential_usernames_to_the_end(&self, start_id: u64) -> Result<()> {
         self.db.flush()?;
         (&self.plme_tree, &self.name_tree, &self.meta_tree).transaction(
             |(ptree, ntree, mtree)| {
@@ -253,7 +251,9 @@ impl InDiskPLM {
 
                 if last_id < start_id {
                     return Err(sled::transaction::ConflictableTransactionError::Abort(
-                        format!("Given id:{start_id} is not in the database."),
+                        format!(
+                            "Given id:{start_id} is not in the database. The last id is {last_id}."
+                        ),
                     ));
                 }
 
@@ -295,19 +295,19 @@ impl Deref for InDiskRevokedList {
 
 #[async_trait]
 impl RevokedListInterface for InDiskRevokedList {
-    async fn open<P: AsRef<Path> + Send>(path: P) -> Result<Self, crate::Error> {
+    async fn open<P: AsRef<Path> + Send>(path: P) -> Result<Self> {
         let path = path.as_ref().join("rl");
         let db = sled::open(&path)?;
         Ok(Self { db })
     }
 
     /// Check if a given pos exists in the RevokedList
-    async fn contains(&self, pos: &[u8]) -> Result<bool, crate::Error> {
+    async fn contains(&self, pos: &[u8]) -> Result<bool> {
         Ok(self.db.get(pos)?.is_some())
     }
 
     /// Insert a given pos into the RevokedList
-    async fn insert(&self, pos: [u8; DGSP_POS_BYTES]) -> Result<(), crate::Error> {
+    async fn insert(&self, pos: [u8; DGSP_POS_BYTES]) -> Result<()> {
         self.db.insert(pos, &[])?;
         Ok(())
     }

@@ -1,5 +1,6 @@
 use crate::db::{PLMInterface, RevokedListInterface};
 use crate::params::DGSP_POS_BYTES;
+use crate::Result;
 use async_trait::async_trait;
 use std::collections::HashSet;
 use std::fmt::Display;
@@ -25,7 +26,7 @@ struct InMemoryPLMData {
 }
 
 impl InMemoryPLMData {
-    fn ensure_id_exists(&self, id: u64) -> Result<(), crate::Error> {
+    fn ensure_id_exists(&self, id: u64) -> Result<()> {
         if id < (self.vec.len() as u64) {
             Ok(())
         } else {
@@ -44,7 +45,7 @@ pub struct InMemoryPLM {
 
 #[async_trait]
 impl PLMInterface for InMemoryPLM {
-    async fn open<P: AsRef<Path> + Send>(_: P) -> Result<Self, crate::Error> {
+    async fn open<P: AsRef<Path> + Send>(_: P) -> Result<Self> {
         Ok(Self {
             data: Arc::new(Mutex::new(InMemoryPLMData::default())),
         })
@@ -54,7 +55,7 @@ impl PLMInterface for InMemoryPLM {
     ///
     /// Returns `Ok(id)` if newly added. Otherwise, throws an `crate::errors::Error` error if given
     /// username already existed, or if an error occurs.
-    async fn add_new_user<S>(&self, username: S) -> Result<u64, crate::Error>
+    async fn add_new_user<S>(&self, username: S) -> Result<u64>
     where
         S: AsRef<str> + Display + Send,
     {
@@ -74,7 +75,7 @@ impl PLMInterface for InMemoryPLM {
     }
 
     /// Deactivate a user by ID
-    async fn deactivate_id(&self, id: u64) -> Result<(), crate::Error> {
+    async fn deactivate_id(&self, id: u64) -> Result<()> {
         let mut data = self.data.lock()?;
         data.ensure_id_exists(id)?;
         data.vec[id as usize].is_active = false;
@@ -82,28 +83,28 @@ impl PLMInterface for InMemoryPLM {
     }
 
     /// Get counter of created certificates for a given user ID
-    async fn get_ctr_id(&self, id: u64) -> Result<u64, crate::Error> {
+    async fn get_ctr_id(&self, id: u64) -> Result<u64> {
         let data = self.data.lock()?;
         data.ensure_id_exists(id)?;
         Ok(data.vec[id as usize].ctr_certs)
     }
 
     /// Get username by ID
-    async fn get_username(&self, id: u64) -> Result<String, crate::Error> {
+    async fn get_username(&self, id: u64) -> Result<String> {
         let data = self.data.lock()?;
         data.ensure_id_exists(id)?;
         Ok(data.vec[id as usize].username.clone())
     }
 
     /// Check if ID exists
-    async fn id_exists(&self, id: u64) -> Result<bool, crate::Error> {
+    async fn id_exists(&self, id: u64) -> Result<bool> {
         let data = self.data.lock()?;
         data.ensure_id_exists(id)?;
         Ok(true)
     }
 
     /// Check if ID is active
-    async fn id_is_active(&self, id: u64) -> Result<bool, crate::Error> {
+    async fn id_is_active(&self, id: u64) -> Result<bool> {
         let data = self.data.lock()?;
         data.ensure_id_exists(id)?;
         Ok(data.vec[id as usize].is_active)
@@ -114,7 +115,7 @@ impl PLMInterface for InMemoryPLM {
     /// Returns `Ok(id)` if request is valid and no error occurs. Otherwise, throws an
     /// `crate::errors::Error` error if current ctr_cert value of the ID plus `add` value exceeds
     /// [`u64::MAX`] bound.
-    async fn increment_ctr_id_by(&self, id: u64, add: u64) -> Result<(), crate::Error> {
+    async fn increment_ctr_id_by(&self, id: u64, add: u64) -> Result<()> {
         let mut data = self.data.lock()?;
         if data.vec[id as usize].ctr_certs > u64::MAX - add {
             return Err(crate::Error::DbInternalError(format!(
@@ -132,10 +133,7 @@ impl PLMInterface for InMemoryPLM {
 impl InMemoryPLM {
     #[cfg(feature = "benchmarking")]
     #[doc(hidden)]
-    pub fn delete_sequential_usernames_to_the_end(
-        &self,
-        start_id: u64,
-    ) -> Result<(), crate::Error> {
+    pub fn delete_sequential_usernames_to_the_end(&self, start_id: u64) -> Result<()> {
         let mut data = self.data.lock()?;
 
         let last_id = data.vec.len();
@@ -162,18 +160,18 @@ pub struct InMemoryRevokedList(Arc<Mutex<HashSet<[u8; DGSP_POS_BYTES]>>>);
 
 #[async_trait]
 impl RevokedListInterface for InMemoryRevokedList {
-    async fn open<P: AsRef<Path> + Send>(_: P) -> Result<Self, crate::Error> {
+    async fn open<P: AsRef<Path> + Send>(_: P) -> Result<Self> {
         Ok(InMemoryRevokedList::default())
     }
 
     /// Check if a given pos exists in the RevokedList
-    async fn contains(&self, pos: &[u8]) -> Result<bool, crate::Error> {
+    async fn contains(&self, pos: &[u8]) -> Result<bool> {
         let data = self.0.lock()?;
         Ok(data.contains(pos))
     }
 
     /// Insert a given pos into the RevokedList
-    async fn insert(&self, pos: [u8; DGSP_POS_BYTES]) -> Result<(), crate::Error> {
+    async fn insert(&self, pos: [u8; DGSP_POS_BYTES]) -> Result<()> {
         let mut data = self.0.lock()?;
         data.insert(pos);
         Ok(())

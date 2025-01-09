@@ -9,7 +9,7 @@ pub mod sphincs_plus;
 pub mod wots_plus;
 
 pub use crate::db::{PLMInterface, RevokedListInterface};
-pub use crate::error::{Error, VerificationError};
+pub use crate::error::{Error, Result, VerificationError};
 
 #[cfg(feature = "in-disk")]
 pub use crate::db::in_disk::{InDiskPLM, InDiskRevokedList};

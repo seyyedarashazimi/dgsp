@@ -84,12 +84,6 @@ fn dgsp_full_benchmarks(c: &mut Criterion) {
     let (pkm, mut skm) = DGSP::keygen_manager().unwrap();
     skm.msk = DGSPMSK::from(MSK);
 
-    println!("Resetting database...");
-    reset_plm(&plm);
-    delete_revoked_list(revoked_list);
-    let revoked_list = FuturesExecutor.block_on(initialize_revoked_list());
-    tweak_plm_rl(&plm, &revoked_list, &skm);
-
     let counter = AtomicU64::new(GROUP_SIZE + TWEAK_USERS_SIZE);
 
     let pool = ThreadPoolBuilder::new().num_threads(1).build().unwrap();
@@ -115,6 +109,12 @@ fn dgsp_full_benchmarks(c: &mut Criterion) {
             });
         });
     });
+
+    println!("Resetting database...");
+    reset_plm(&plm);
+    delete_revoked_list(revoked_list);
+    let revoked_list = FuturesExecutor.block_on(initialize_revoked_list());
+    tweak_plm_rl(&plm, &revoked_list, &skm);
 
     group.bench_function("join", |b| {
         pool.install(|| {
@@ -143,13 +143,6 @@ fn dgsp_full_benchmarks(c: &mut Criterion) {
         });
     });
 
-    println!("Resetting database...");
-    reset_plm(&plm);
-    delete_revoked_list(revoked_list);
-    let revoked_list = FuturesExecutor.block_on(initialize_revoked_list());
-    tweak_plm_rl(&plm, &revoked_list, &skm);
-    let counter = AtomicU64::new(GROUP_SIZE + TWEAK_USERS_SIZE);
-
     group.bench_function("csr", |b| {
         pool.install(|| {
             b.iter_custom(|num_iters| {
@@ -172,6 +165,13 @@ fn dgsp_full_benchmarks(c: &mut Criterion) {
             });
         });
     });
+
+    println!("Resetting database...");
+    reset_plm(&plm);
+    delete_revoked_list(revoked_list);
+    let revoked_list = FuturesExecutor.block_on(initialize_revoked_list());
+    tweak_plm_rl(&plm, &revoked_list, &skm);
+    let counter = AtomicU64::new(GROUP_SIZE + TWEAK_USERS_SIZE);
 
     group.bench_function("cert", |b| {
         pool.install(|| {
@@ -435,12 +435,6 @@ fn dgsp_full_benchmarks(c: &mut Criterion) {
             });
         });
     });
-
-    println!("Resetting database...");
-    reset_plm(&plm);
-    delete_revoked_list(revoked_list);
-    let revoked_list = FuturesExecutor.block_on(initialize_revoked_list());
-    tweak_plm_rl(&plm, &revoked_list, &skm);
 
     group.finish();
 }

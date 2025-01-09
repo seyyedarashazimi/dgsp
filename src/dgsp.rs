@@ -6,7 +6,7 @@ use crate::params::{DGSP_N, DGSP_POS_BYTES};
 use crate::sphincs_plus::*;
 use crate::utils::{array_struct, bytes_to_u64, u64_to_bytes};
 use crate::wots_plus::{WotsPlus, WTS_ADRS_RAND_BYTES};
-use crate::{Error, VerificationError};
+use crate::{Error, Result, VerificationError};
 use aes::cipher::{generic_array::GenericArray, BlockDecrypt, BlockEncrypt, KeyInit};
 use aes::Aes256;
 use rand::rngs::OsRng;
@@ -19,10 +19,10 @@ use serde::{Deserialize, Serialize};
 #[cfg(feature = "serialization")]
 use serde_big_array::BigArray;
 
-#[cfg(feature = "in-disk")]
-pub use crate::{InDiskPLM, InDiskRevokedList};
-#[cfg(feature = "in-memory")]
-pub use crate::{InMemoryPLM, InMemoryRevokedList};
+// #[cfg(feature = "in-disk")]
+// use crate::{InDiskPLM, InDiskRevokedList};
+// #[cfg(feature = "in-memory")]
+// use crate::{InMemoryPLM, InMemoryRevokedList};
 
 /// wots_sgn_seed is pk_seed of W-OTS+
 #[cfg_attr(feature = "serialization", derive(Serialize, Deserialize))]
@@ -71,6 +71,7 @@ pub struct DGSPManagerPublicKey {
 pub struct DGSPSignature {
     #[cfg_attr(feature = "serialization", serde(with = "BigArray"))]
     pub wots_sig: [u8; SPX_WOTS_BYTES],
+
     pub pos: [u8; DGSP_POS_BYTES],
     pub spx_sig: SphincsPlusSignature,
     pub wots_rand: DGSPWotsRand,
@@ -80,9 +81,8 @@ pub struct DGSPSignature {
 pub struct DGSP;
 
 impl DGSP {
-    pub fn keygen_manager() -> Result<(DGSPManagerPublicKey, DGSPManagerSecretKey), Error> {
-        let sp = SphincsPlus;
-        let (spx_pk, spx_sk) = sp.keygen()?;
+    pub fn keygen_manager() -> Result<(DGSPManagerPublicKey, DGSPManagerSecretKey)> {
+        let (spx_pk, spx_sk) = SphincsPlus::keygen()?;
         let mut msk = DGSPMSK::from([0u8; DGSP_N]);
         OsRng.fill_bytes(&mut msk.0);
 
@@ -96,10 +96,10 @@ impl DGSP {
         msk: &DGSPMSK,
         username: &str,
         plm: &P,
-    ) -> Result<(u64, [u8; DGSP_N]), Error> {
-        let new_id = plm.add_new_user(username).await?;
-        let cid = Self::calculate_cid(msk, new_id);
-        Ok((new_id, cid))
+    ) -> Result<(u64, [u8; DGSP_N])> {
+        let id = plm.add_new_user(username).await?;
+        let cid = Self::calculate_cid(msk, id);
+        Ok((id, cid))
     }
 
     pub async fn req_cert<P: PLMInterface>(
@@ -109,7 +109,7 @@ impl DGSP {
         wotsplus_public_keys: &Vec<[u8; SPX_WOTS_PK_BYTES]>,
         plm: &P,
         sphincs_plus_secret_key: &SphincsPlusSecretKey,
-    ) -> Result<Vec<([u8; DGSP_POS_BYTES], SphincsPlusSignature)>, Error> {
+    ) -> Result<Vec<([u8; DGSP_POS_BYTES], SphincsPlusSignature)>> {
         Self::req_validity(msk, id, &cid, plm).await?;
 
         let certs: Vec<([u8; DGSP_POS_BYTES], SphincsPlusSignature)> = Self::generate_certificates(
@@ -132,7 +132,7 @@ impl DGSP {
         wotsplus_public_keys: &Vec<[u8; SPX_WOTS_PK_BYTES]>,
         ctr_id: u64,
         sphincs_plus_sk: &SphincsPlusSecretKey,
-    ) -> Result<Vec<([u8; DGSP_POS_BYTES], SphincsPlusSignature)>, Error> {
+    ) -> Result<Vec<([u8; DGSP_POS_BYTES], SphincsPlusSignature)>> {
         // Initialize AES-256 cipher
         let cipher = Aes256::new(GenericArray::from_slice(msk.as_ref()));
 
@@ -158,10 +158,10 @@ impl DGSP {
 
                 Ok::<([u8; 16], SphincsPlusSignature), Error>((
                     pos,
-                    SphincsPlus.sign(&message, sphincs_plus_sk)?,
+                    SphincsPlus::sign(&message, sphincs_plus_sk)?,
                 ))
             })
-            .collect::<Result<Vec<([u8; DGSP_POS_BYTES], SphincsPlusSignature)>, Error>>()
+            .collect::<Result<Vec<([u8; DGSP_POS_BYTES], SphincsPlusSignature)>>>()
     }
 
     pub async fn revoke<P: PLMInterface, R: RevokedListInterface>(
@@ -169,7 +169,7 @@ impl DGSP {
         plm: &P,
         to_be_revoked: Vec<u64>,
         revoked_list: &R,
-    ) -> Result<(), Error> {
+    ) -> Result<()> {
         for r in to_be_revoked {
             if plm.id_exists(r).await? && plm.id_is_active(r).await? {
                 let pos_list = Self::par_dgsp_pos(msk, r, 0, plm.get_ctr_id(r).await?);
@@ -186,7 +186,7 @@ impl DGSP {
         msk: &DGSPMSK,
         plm: &P,
         sig: &DGSPSignature,
-    ) -> Result<(u64, String), Error> {
+    ) -> Result<(u64, String)> {
         let mut pos = sig.pos;
         let block = GenericArray::from_mut_slice(&mut pos);
 
@@ -210,7 +210,7 @@ impl DGSP {
         id: u64,
         cid: &[u8; DGSP_N],
         plm: &P,
-    ) -> Result<(), Error> {
+    ) -> Result<()> {
         // check if user exists and is active
         if !plm.id_exists(id).await? || !plm.id_is_active(id).await? {
             return Err(Error::InvalidCertReq);
@@ -302,7 +302,7 @@ impl DGSP {
         sig: &DGSPSignature,
         revoked_list: &R,
         pk: &DGSPManagerPublicKey,
-    ) -> Result<(), Error> {
+    ) -> Result<()> {
         if revoked_list.contains(&sig.pos).await? {
             return Err(VerificationError::RevokedSignature)?;
         }
@@ -324,11 +324,11 @@ impl DGSP {
         spx_msg[..SPX_WOTS_PK_BYTES].copy_from_slice(wots_pk.as_ref());
         spx_msg[SPX_WOTS_PK_BYTES..].copy_from_slice(sig.pos.as_ref());
 
-        SphincsPlus.verify(&sig.spx_sig, &spx_msg, &pk.spx_pk)
+        SphincsPlus::verify(&sig.spx_sig, &spx_msg, &pk.spx_pk)
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, any(feature = "in-disk", feature = "in-memory")))]
 mod tests {
     use super::*;
     use rand::distributions::Alphanumeric;

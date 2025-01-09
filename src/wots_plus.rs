@@ -19,12 +19,8 @@
 //! ## Important
 //!
 //! This W-OTS+ implementation is provided to be used in a bigger signature scheme like DGSP and
-//! optimized for that use. Therefore, it is not suggested to be used as an standalone signature
+//! optimized for that use. Therefore, it is not suggested to be used as a standalone signature
 //! scheme.
-//!
-//! ## Tests
-//!
-//! Comprehensive tests are provided to validate key generation, signing, verification, and consistency of derived public keys.
 
 use crate::hash::DGSPHasher;
 use crate::sphincs_plus::{
@@ -49,6 +45,19 @@ pub struct WotsPlus {
 }
 
 impl WotsPlus {
+    /// Creates a new `WotsPlus` instance with the specified public seed.
+    ///
+    /// This constructor initializes the WOTS+ state using the provided public seed.
+    /// The public seed is used for hashing operations and is crucial for the security
+    /// of the scheme.
+    ///
+    /// # Arguments
+    ///
+    /// * `pub_seed` - A `SPX_N`-byte public seed used for the hashing operations in WOTS+.
+    ///
+    /// # Returns
+    ///
+    /// A new instance of `WotsPlus` initialized with the given public seed.
     pub fn new(pub_seed: &[u8; SPX_N]) -> Self {
         let hasher = DGSPHasher::new(pub_seed);
         Self {
@@ -57,6 +66,23 @@ impl WotsPlus {
         }
     }
 
+    /// Creates a new `WotsPlus` instance with the specified address randomness and public seed.
+    ///
+    /// This constructor allows initializing the WOTS+ state with a specific address randomness
+    /// (`adrs_rand`). This is useful for deterministic scenarios where reproducibility is required.
+    ///
+    /// # Arguments
+    ///
+    /// * `adrs_rand` - A byte slice representing the random bytes used for address derivation.
+    /// * `pub_seed` - A `SPX_N`-byte public seed used for hashing operations.
+    ///
+    /// # Returns
+    ///
+    /// A new instance of `WotsPlus` initialized with the given randomness and public seed.
+    ///
+    /// # Panics
+    ///
+    /// This function panics if the length of `adrs_rand` is not exactly [`WTS_ADRS_RAND_BYTES`] bytes.
     pub fn new_from_rand(adrs_rand: &[u8], pub_seed: &[u8; SPX_N]) -> Self {
         let hasher = DGSPHasher::new(pub_seed);
         Self {
@@ -65,34 +91,98 @@ impl WotsPlus {
         }
     }
 
-    /// Generate private and public keys.
+    /// Generates a WOTS+ keypair.
+    ///
+    /// This method generates a private key (`sk`) and the corresponding public key (`pk`)
+    /// based on the given secret key seed (`sk_seed`).
+    ///
+    /// # Arguments
+    ///
+    /// * `sk_seed` - A byte slice used as the seed for generating the public and private keys,
+    ///   expecting to be `SPX_N` bytes.
+    ///
+    /// # Returns
+    ///
+    /// A tuple containing:
+    /// * `[u8; SPX_WOTS_BYTES]` - The generated public key.
+    /// * `[u8; SPX_WOTS_BYTES]` - The corresponding secret key.
     pub fn keygen(&self, sk_seed: &[u8]) -> ([u8; SPX_WOTS_BYTES], [u8; SPX_WOTS_BYTES]) {
         let mut adrs = Adrs::new_full_from_rand(WotsHash, &self.adrs_rand);
         self.gen_pk_sk(sk_seed, 0, &mut adrs)
     }
 
-    /// Sign a message with a private key.
+    /// Signs a message using the provided WOTS+ private key.
+    ///
+    /// This method generates a WOTS+ signature for the given message using the provided
+    /// private key (`sk`).
+    ///
+    /// # Arguments
+    ///
+    /// * `message` - A byte slice representing the message to be signed.
+    /// * `sk` - A byte slice containing the WOTS+ private key, expecting to be SPX_WOTS_BYTES bytes.
+    ///
+    /// # Returns
+    ///
+    /// A `[u8; SPX_WOTS_BYTES]` array containing the generated signature.
     pub fn sign(&self, message: &[u8], sk: &[u8]) -> [u8; SPX_WOTS_BYTES] {
         let mut adrs = Adrs::new_full_from_rand(WotsHash, &self.adrs_rand);
         self.gen_sig(sk, 0, &mut adrs, message)
     }
 
+    /// Signs a message using the secret key seed (`sk_seed`).
+    ///
+    /// This method generates a WOTS+ signature for the given message by deriving
+    /// the private key from the provided secret key seed.
+    ///
+    /// # Arguments
+    ///
+    /// * `message` - A byte slice representing the message to be signed.
+    /// * `sk_seed` - A `SPX_N`-byte array containing the secret key seed.
+    ///
+    /// # Returns
+    ///
+    /// A `[u8; SPX_WOTS_BYTES]` array containing the generated signature.
     pub fn sign_from_sk_seed(&self, message: &[u8], sk_seed: &[u8; SPX_N]) -> [u8; SPX_WOTS_BYTES] {
         let mut adrs = Adrs::new_full_from_rand(WotsPrf, &self.adrs_rand);
         self.gen_sig_from_sk_seed(sk_seed, 0, &mut adrs, message)
     }
 
-    /// Verify a signature.
+    /// Verifies a WOTS+ signature for a given message and public key.
+    ///
+    /// This method checks the validity of a WOTS+ signature for the specified message
+    /// using the provided public key. It computes the expected public key from the
+    /// signature and compares it to the provided public key.
+    ///
+    /// # Arguments
+    ///
+    /// * `signature` - A byte slice containing the WOTS+ signature to verify.
+    /// * `message` - A byte slice representing the message associated with the signature.
+    /// * `pk` - A byte slice containing the WOTS+ public key.
+    ///
+    /// # Returns
+    ///
+    /// A `bool` indicating whether the signature is valid:
+    /// * `true` - The signature is valid.
+    /// * `false` - The signature is invalid.
     pub fn verify(&self, signature: &[u8], message: &[u8], pk: &[u8]) -> bool {
         let mut adrs = Adrs::new_full_from_rand(WotsHash, &self.adrs_rand);
         let calculated_pk = self.wots_pk_from_sig(signature, message, 0, &mut adrs);
-        if calculated_pk != pk {
-            return false;
-        }
-        true
+        calculated_pk == pk
     }
 
-    /// Compute the public key from a signature and message.
+    /// Computes the public key from a WOTS+ signature and message.
+    ///
+    /// This method derives the WOTS+ public key from the given signature and message.
+    /// It can be used to verify that the derived public key matches an expected public key.
+    ///
+    /// # Arguments
+    ///
+    /// * `signature` - A byte slice containing the WOTS+ signature.
+    /// * `message` - A byte slice representing the message associated with the signature.
+    ///
+    /// # Returns
+    ///
+    /// A `[u8; SPX_WOTS_PK_BYTES]` array containing the computed public key.
     pub fn pk_from_sig(&self, signature: &[u8], message: &[u8]) -> [u8; SPX_WOTS_PK_BYTES] {
         let mut adrs = Adrs::new_full_from_rand(WotsHash, &self.adrs_rand);
         self.wots_pk_from_sig(signature, message, 0, &mut adrs)

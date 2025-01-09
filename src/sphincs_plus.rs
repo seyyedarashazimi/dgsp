@@ -5,7 +5,7 @@
 //! simplifies the use of SPHINCS+ as part of a post-quantum group signature scheme, abstracting the
 //! underlying C-based implementations provided by [PQClean](https://github.com/PQClean/PQClean/).
 //!
-//! The `Sphincs` struct is the main interface for generating keypairs, signing messages, and
+//! The `SphincsPlus` struct is the main interface for generating keypairs, signing messages, and
 //! verifying signatures. It supports a variety of parameter sets, each offering different
 //! trade-offs between performance, signature size, and security level.
 //!
@@ -14,7 +14,8 @@
 //! - **Memory Safety**: Leverages Rust's memory safety features and the `Zeroize` trait to ensure
 //!   that sensitive cryptographic materials are securely erased when no longer needed.
 //! - **Parameterized Configurations**: Supports all SPHINCS+ variants, including different
-//!   security levels (128, 192, and 256 bits) and optimizations for speed or signature size.
+//!   security levels (128, 192, and 256 bits) and optimizations for speed or signature size,
+//!   as well as the choice of underlying hash function (SHA-2 or SHAKE).
 //! - **Idiomatically Rust**: Provides high-level methods to manage keys and signatures using
 //!   standard Rust data types, avoiding the need for low-level foreign function interface (FFI)
 //!   interactions.
@@ -22,12 +23,12 @@
 //! ## SPHINCS+ Overview
 //!
 //! SPHINCS+ is a stateless hash-based post-quantum signature scheme designed to provide long-term
-//! security against attacks by quantum computers. It is ideal for applications where resilience to
-//! both classical and quantum adversaries is necessary.
+//! security against quantum computers. It is ideal for applications where resilience to both
+//! classical and quantum adversaries is necessary.
 //!
-//! This wrapper includes SPHINCS+ variants with either SHAKE or SHA-256 hash functions, available
-//! at security levels of 128, 192, and 256 bits. Each variant is additionally available in `fast` (`F`)
-//! or `small` (`S`) configurations, depending on the optimization goal.
+//! This wrapper includes SPHINCS+ variants with either SHAKE or SHA-2 hash functions, available
+//! at security levels of 128, 192, and 256 bits. Each variant is additionally available in
+//! `fast`(`F`) or `small`(`S`) configurations, depending on the optimization goal.
 //!
 //! ## Supported Variants
 //!
@@ -35,10 +36,10 @@
 //! and optimization type:
 //!
 //! - **SHAKE (at 128, 192, 256-bit levels)**: `F` (Fast) or `S` (Small).
-//! - **SHA-256 (at 128, 192, 256-bit levels)**: `F` (Fast) or `S` (Small).
+//! - **SHA-2 (at 128, 192, 256-bit levels)**: `F` (Fast) or `S` (Small).
 //!
-//! The `SphincsType` enum captures these different variants, and users can select the desired
-//! configuration based on specific requirements.
+//! To specify a SPHINCS+ variant, enable the appropriate feature from the feature set provided by
+//! the `dgsp` crate.
 //!
 //! ## Usage Example
 //!
@@ -47,12 +48,7 @@
 //! ```rust
 //! use dgsp::sphincs_plus::SphincsPlus;
 //!
-//! // Instantiate a SPHINCS+ wrapper for SHAKE-128 with fast optimization.
-//! let sphincs = SphincsPlus::default();
-//!
-//! // Generate a keypair (public and secret keys).
-//! let (public_key, secret_key) = sphincs.keygen().expect("Key generation failed");
-//! println!("Generated public key: {:?}", public_key);
+//! let (public_key, secret_key) = SphincsPlus::keygen().expect("Key generation failed");
 //! ```
 //!
 //! ### Signing a Message
@@ -60,12 +56,10 @@
 //! ```rust
 //! use dgsp::sphincs_plus::SphincsPlus;
 //!
-//! let sphincs = SphincsPlus::default();
-//! let (_, secret_key) = sphincs.keygen().expect("Key generation failed");
+//! let (_, secret_key) = SphincsPlus::keygen().expect("Key generation failed");
 //!
-//! let message = b"DGSP post-quantum group signature message";
-//! let signature = sphincs.sign(message, &secret_key).expect("Signing failed");
-//! println!("Generated signature: {:?}", signature);
+//! let message = b"DGSP post-quantum group signature message.";
+//! let signature = SphincsPlus::sign(message, &secret_key).expect("Signing failed");
 //! ```
 //!
 //! ### Verifying a Signature
@@ -73,56 +67,47 @@
 //! ```rust
 //! use dgsp::sphincs_plus::SphincsPlus;
 //!
-//! let sphincs = SphincsPlus::default();
-//! let (public_key, secret_key) = sphincs.keygen().expect("Key generation failed");
+//! let (public_key, secret_key) = SphincsPlus::keygen().expect("Key generation failed");
 //!
-//! let message = b"DGSP post-quantum group signature message";
-//! let signature = sphincs.sign(message, &secret_key).expect("Signing failed");
+//! let message = b"DGSP post-quantum group signature message.";
+//! let signature = SphincsPlus::sign(message, &secret_key).expect("Signing failed");
 //!
-//! // Verify the generated signature.
-//! let is_valid = sphincs.verify(&signature, message, &public_key).is_ok();
-//! assert!(is_valid, "Signature verification failed");
-//! println!("Signature is valid!");
+//! let is_valid = SphincsPlus::verify(&signature, message, &public_key).is_ok();
+//! assert!(is_valid);
 //! ```
 //!
 //! ## API Overview
 //!
-//! - **`Sphincs`**: Main struct representing the SPHINCS+ scheme. Allows for generating keypairs,
-//!   signing messages, and verifying signatures.
-//! - **`SphincsType`**: Enum representing the supported SPHINCS+ variants, including different hash
-//!   functions, security levels, and optimization options.
-//! - **`SphincsData`**: A wrapper around `Vec<u8>` used for securely holding cryptographic data,
-//!   with automatic memory zeroization when dropped.
+//! - **`SphincsPlus`**: Main struct representing the SPHINCS+ scheme. Allows for generating
+//!   keypairs, signing messages, and verifying signatures.
+//! - **`SphincsPlusPublicKey`**: A wrapper around `[u8, SPX_PK_BYTES]` used for securely holding
+//!   SPHINCS+ public-key with automatic memory zeroization when dropped.
+//! - **`SphincsPlusSecretKey`**: A wrapper around `[u8, SPX_SK_BYTES]` used for securely holding
+//!   SPHINCS+ secret-key with automatic memory zeroization when dropped.
+//! - **`SphincsPlusSignature`**: A wrapper around `[u8, SPX_BYTES]` used for securely holding
+//!   SPHINCS+ signature with automatic memory zeroization when dropped.
 //!
 //! ## Security Considerations
 //!
-//! - **Sensitive Data Handling**: The `SphincsData` struct is used to hold sensitive information,
-//!   such as secret keys. It automatically zeroizes memory when instances are dropped to reduce
+//! - **Sensitive Data Handling**: The SPHINCS+ data types are used to hold sensitive information,
+//!   such as secret key. It automatically zeroizes memory when instances are dropped to reduce
 //!   the risk of exposing cryptographic material.
-//! - **Cloning Sensitivity**: Cloning of `SphincsData` is supported but should be done cautiously,
-//!   as it duplicates sensitive information in memory.
-//! - **Quantum Resistance**: SPHINCS+ is resistant to attacks from both classical and quantum computers,
+//! - **Cloning Sensitivity**: Cloning of SPHINCS+ data types is supported but should be done
+//!   cautiously, as it duplicates sensitive information in memory.
+//! - **Quantum Resistance**: SPHINCS+ is resistant against both classical and quantum computers,
 //!   making it a good choice for future-proof cryptographic systems.
 //!
 //! ## Dependencies
 //!
-//! - **[`pqcrypto-sphincsplus`](https://crates.io/crates/pqcrypto-sphincsplus)**: Provides Rust bindings to
-//!   the C implementations of SPHINCS+ from PQClean.
-//! - **[`PQClean`](https://github.com/PQClean/PQClean/)**: Supplies the underlying C implementations
-//!   of cryptographic algorithms, focusing on ensuring correctness and security through well-reviewed code.
-//! - **`Zeroize`**: Ensures sensitive cryptographic material is securely wiped from memory when no
+//! - **[`pqcrypto-sphincsplus`](https://crates.io/crates/pqcrypto-sphincsplus)**: Provides Rust
+//!   bindings to the C implementations of SPHINCS+ from PQClean.
+//! - **[`PQClean`](https://github.com/PQClean/PQClean/)**: Supplies the underlying C
+//!   implementations of cryptographic algorithms, focusing on ensuring correctness and security
+//!   through well-reviewed code.
+//! - **`zeroize`**: Ensures sensitive cryptographic material is securely wiped from memory when no
 //!   longer needed.
-//!
-//! ## Custom Macros for Simplification
-//!
-//! This crate uses custom macros to simplify the implementation of keypair generation, signature creation,
-//! and verification for each `SphincsType` variant. These macros (`gen_sphincs_keypair`, `gen_sphincs_detached_sign`,
-//! and `gen_sphincs_verify_detached_signature`) reduce boilerplate code and ensure consistency across all variants.
-//!
-//! ## Errors
-//!
-//! - **`SphincsError`**: Custom error type that handles issues such as mismatched key sizes and signature
-//!   verification failures. All functions that may fail return `Result` to facilitate idiomatic error handling in Rust.
+//! - **`serde`**: when `serialization` feature is active for dgsp crate, this wrapper uses `serde`
+//!   `serde_big_array` to serialize the data types.
 //!
 //! ## Example Walkthrough
 //!
@@ -133,20 +118,16 @@
 //! 3. **Sign the Message**: Use the `sign()` method with the message and secret key.
 //! 4. **Verify the Signature**: Use the `verify()` method with the signature, message, and public key.
 //!
-//! ## License
-//!
-//! This module is distributed under the MIT License. See `LICENSE` for more information.
-//!
 //! ## Acknowledgements
 //!
-//! This wrapper relies on the work of the PQClean project and the `pqcrypto` crate series for providing
-//! robust, post-quantum cryptographic primitives in a safe and accessible manner.
+//! This wrapper relies on the work of the PQClean project and the `pqcrypto` crate series for
+//! providing robust, post-quantum cryptographic primitives in a safe and accessible manner.
 //!
-//! The macros and abstractions provided in this wrapper are also inspired by the need for usability in
-//! building complex cryptographic protocols, such as post-quantum group signature schemes.
+//! The abstractions provided in this wrapper are also inspired by the need for usability in
+//! building complex cryptographic protocols, such as the DGSP post-quantum group signature scheme.
 
-use crate::error::{Error, VerificationError};
 use crate::utils::array_struct;
+use crate::{Error, Result, VerificationError};
 use pqcrypto_traits::sign::{DetachedSignature, PublicKey, SecretKey};
 use zeroize::Zeroize;
 
@@ -155,30 +136,18 @@ use serde::{Deserialize, Serialize};
 #[cfg(feature = "serialization")]
 use serde_big_array::BigArray;
 
-#[cfg(feature = "sphincs_sha2_128f")]
-pub use crate::sphincs_plus::params_sphincs_sha2_128f::*;
-#[cfg(feature = "sphincs_sha2_128s")]
-pub use crate::sphincs_plus::params_sphincs_sha2_128s::*;
-#[cfg(feature = "sphincs_sha2_192f")]
-pub use crate::sphincs_plus::params_sphincs_sha2_192f::*;
-#[cfg(feature = "sphincs_sha2_192s")]
-pub use crate::sphincs_plus::params_sphincs_sha2_192s::*;
-#[cfg(feature = "sphincs_sha2_256f")]
-pub use crate::sphincs_plus::params_sphincs_sha2_256f::*;
-#[cfg(feature = "sphincs_sha2_256s")]
-pub use crate::sphincs_plus::params_sphincs_sha2_256s::*;
-#[cfg(feature = "sphincs_shake_128f")]
-pub use crate::sphincs_plus::params_sphincs_shake_128f::*;
-#[cfg(feature = "sphincs_shake_128s")]
-pub use crate::sphincs_plus::params_sphincs_shake_128s::*;
-#[cfg(feature = "sphincs_shake_192f")]
-pub use crate::sphincs_plus::params_sphincs_shake_192f::*;
-#[cfg(feature = "sphincs_shake_192s")]
-pub use crate::sphincs_plus::params_sphincs_shake_192s::*;
-#[cfg(feature = "sphincs_shake_256f")]
-pub use crate::sphincs_plus::params_sphincs_shake_256f::*;
-#[cfg(feature = "sphincs_shake_256s")]
-pub use crate::sphincs_plus::params_sphincs_shake_256s::*;
+#[cfg(any(feature = "sphincs_shake_128f", feature = "sphincs_sha2_128f"))]
+pub use crate::sphincs_plus::params_sphincs_128f::*;
+#[cfg(any(feature = "sphincs_shake_128s", feature = "sphincs_sha2_128s"))]
+pub use crate::sphincs_plus::params_sphincs_128s::*;
+#[cfg(any(feature = "sphincs_shake_192f", feature = "sphincs_sha2_192f"))]
+pub use crate::sphincs_plus::params_sphincs_192f::*;
+#[cfg(any(feature = "sphincs_shake_192s", feature = "sphincs_sha2_192s"))]
+pub use crate::sphincs_plus::params_sphincs_192s::*;
+#[cfg(any(feature = "sphincs_shake_256f", feature = "sphincs_sha2_256f"))]
+pub use crate::sphincs_plus::params_sphincs_256f::*;
+#[cfg(any(feature = "sphincs_shake_256s", feature = "sphincs_sha2_256s"))]
+pub use crate::sphincs_plus::params_sphincs_256s::*;
 
 #[cfg(feature = "sphincs_sha2_128f")]
 use pqcrypto_sphincsplus::sphincssha2128fsimple::*;
@@ -205,30 +174,18 @@ use pqcrypto_sphincsplus::sphincsshake256fsimple::*;
 #[cfg(feature = "sphincs_shake_256s")]
 use pqcrypto_sphincsplus::sphincsshake256ssimple::*;
 
-#[cfg(feature = "sphincs_sha2_128f")]
-mod params_sphincs_sha2_128f;
-#[cfg(feature = "sphincs_sha2_128s")]
-mod params_sphincs_sha2_128s;
-#[cfg(feature = "sphincs_sha2_192f")]
-mod params_sphincs_sha2_192f;
-#[cfg(feature = "sphincs_sha2_192s")]
-mod params_sphincs_sha2_192s;
-#[cfg(feature = "sphincs_sha2_256f")]
-mod params_sphincs_sha2_256f;
-#[cfg(feature = "sphincs_sha2_256s")]
-mod params_sphincs_sha2_256s;
-#[cfg(feature = "sphincs_shake_128f")]
-mod params_sphincs_shake_128f;
-#[cfg(feature = "sphincs_shake_128s")]
-mod params_sphincs_shake_128s;
-#[cfg(feature = "sphincs_shake_192f")]
-mod params_sphincs_shake_192f;
-#[cfg(feature = "sphincs_shake_192s")]
-mod params_sphincs_shake_192s;
-#[cfg(feature = "sphincs_shake_256f")]
-mod params_sphincs_shake_256f;
-#[cfg(feature = "sphincs_shake_256s")]
-mod params_sphincs_shake_256s;
+#[cfg(any(feature = "sphincs_shake_128f", feature = "sphincs_sha2_128f"))]
+mod params_sphincs_128f;
+#[cfg(any(feature = "sphincs_shake_128s", feature = "sphincs_sha2_128s"))]
+mod params_sphincs_128s;
+#[cfg(any(feature = "sphincs_shake_192f", feature = "sphincs_sha2_192f"))]
+mod params_sphincs_192f;
+#[cfg(any(feature = "sphincs_shake_192s", feature = "sphincs_sha2_192s"))]
+mod params_sphincs_192s;
+#[cfg(any(feature = "sphincs_shake_256f", feature = "sphincs_sha2_256f"))]
+mod params_sphincs_256f;
+#[cfg(any(feature = "sphincs_shake_256s", feature = "sphincs_sha2_256s"))]
+mod params_sphincs_256s;
 
 #[cfg(any(
     feature = "sphincs_sha2_128f",
@@ -278,50 +235,114 @@ array_struct!(SphincsPlusSignature, SPX_BYTES);
 /// speed, and signature size.
 pub struct SphincsPlus;
 
-impl Default for SphincsPlus {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
 impl SphincsPlus {
-    /// Creates `SphincsPlus` instance based on the active SPHINCS+ feature.
-    /// It also sets the length of the public-key, secret-key, and signature byte sizes based on the
-    /// given SPHINCS+ type.
-    pub fn new() -> Self {
-        SphincsPlus
-    }
-
-    /// Generate (pk, sk) keypair of SPHINCS+ for an instance of `SphincsPlus`.
-    pub fn keygen(&self) -> Result<(SphincsPlusPublicKey, SphincsPlusSecretKey), Error> {
+    /// Generates (public-key, secret-key) keypair for SPHINCS+ signature scheme.
+    ///
+    /// # Returns
+    ///
+    /// A `Result` containing:
+    /// * `Ok((SphincsPlusPublicKey, SphincsPlusSecretKey))` - The generated keypair, consisting
+    ///   of the public and secret keys.
+    /// * `Err(Error)` - If an error occurs during key generation or conversion.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use dgsp::sphincs_plus::{SphincsPlus, SphincsPlusPublicKey, SphincsPlusSecretKey};
+    ///
+    /// match SphincsPlus::keygen() {
+    ///     Ok((public_key, secret_key)) => {
+    ///         println!("Public Key: {:?}", public_key);
+    ///         println!("Secret Key: {:?}", secret_key);
+    ///     }
+    ///     Err(e) => eprintln!("Key generation failed: {:?}", e),
+    /// }
+    /// ```
+    pub fn keygen() -> Result<(SphincsPlusPublicKey, SphincsPlusSecretKey)> {
         let (pk, sk) = keypair();
         Ok((pk.as_bytes().try_into()?, sk.as_bytes().try_into()?))
     }
 
-    /// Calculate the SPHINCS+ signature for a given `SphincsPlus` instance, based on the given
-    /// message and secret-key.
-    pub fn sign(
-        &self,
-        message: &[u8],
-        sk: &SphincsPlusSecretKey,
-    ) -> Result<SphincsPlusSignature, Error> {
+    /// Signs a message using the provided SPHINCS+ secret key.
+    ///
+    /// This function calculates the SPHINCS+ signature for the given message using
+    /// the specified secret key. The signature is generated using the detached
+    /// signing mechanism provided by the `detached_sign` function.
+    ///
+    /// # Arguments
+    ///
+    /// * `message` - A byte slice representing the message to be signed.
+    /// * `sk` - A reference to the SPHINCS+ secret key used for signing.
+    ///
+    /// # Returns
+    ///
+    /// This function returns a `Result`:
+    /// * `Ok(SphincsPlusSignature)` - If the signature generation is successful.
+    /// * `Err(Error)` - If there is an error during the signing process, such as an
+    ///   invalid key conversion because of incorrect length.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use dgsp::sphincs_plus::{SphincsPlus, SphincsPlusSecretKey};
+    ///
+    /// let message = b"Hello, SPHINCS+!";
+    /// let (_,secret_key) = SphincsPlus::keygen().unwrap();
+    ///
+    /// match SphincsPlus::sign(message, &secret_key) {
+    ///     Ok(signature) => println!("Signature: {:?}", signature),
+    ///     Err(e) => eprintln!("Signing failed: {:?}", e),
+    /// }
+    /// ```
+    pub fn sign(message: &[u8], sk: &SphincsPlusSecretKey) -> Result<SphincsPlusSignature> {
         detached_sign(message, &SecretKey::from_bytes(sk.as_ref())?)
             .as_bytes()
             .try_into()
     }
 
-    /// Verify the SPHINCS+ signature for a given `SphincsPlus` instance, based on the given message
-    /// and public-key.
+    /// Verifies a SPHINCS+ signature for a given message and public key.
     ///
-    /// It returns `Err(SphincsError)` if the there is an error either about wrong data length or if
-    /// the signature is invalid. Otherwise, if the signature is valid for the given message, it
-    /// returns `Ok(())`, showing the validity of the given signature.
+    /// This function checks the validity of a SPHINCS+ signature for the specified message
+    /// using the provided public key. It uses the detached signature verification mechanism.
+    ///
+    /// # Arguments
+    ///
+    /// * `signature` - A reference to the SPHINCS+ signature to be verified.
+    /// * `message` - A byte slice containing the message that was signed.
+    /// * `pk` - A reference to the SPHINCS+ public key corresponding to the signature.
+    ///
+    /// # Returns
+    ///
+    /// A `Result` indicating the outcome of the verification:
+    /// * `Ok(())` - If the signature is valid for the given message and public key.
+    /// * `Err(SphincsError)` - If the signature is invalid, or if an error occurs due to
+    ///   incorrect data length or other issues during verification.
+    ///
+    /// # Errors
+    ///
+    /// This function returns an error if:
+    /// * The signature or public key has an incorrect length.
+    /// * The signature is invalid for the given message and public key.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use dgsp::sphincs_plus::{SphincsPlus, SphincsPlusSignature, SphincsPlusPublicKey};
+    ///
+    /// let message = b"Hello, SPHINCS+!";
+    /// let (public_key,secret_key) = SphincsPlus::keygen().unwrap();
+    /// let signature = SphincsPlus::sign(message, &secret_key).unwrap();
+    ///
+    /// match SphincsPlus::verify(&signature, message, &public_key) {
+    ///     Ok(()) => println!("Signature is valid."),
+    ///     Err(e) => eprintln!("Signature verification failed: {:?}", e),
+    /// }
+    /// ```
     pub fn verify(
-        &self,
         signature: &SphincsPlusSignature,
         message: &[u8],
         pk: &SphincsPlusPublicKey,
-    ) -> Result<(), Error> {
+    ) -> Result<()> {
         Ok(verify_detached_signature(
             &DetachedSignature::from_bytes(signature.as_ref())?,
             message,
@@ -338,9 +359,7 @@ mod tests {
 
     #[test]
     fn test_sphincs_plus() {
-        let sp = SphincsPlus::new();
-
-        let kg = sp.keygen();
+        let kg = SphincsPlus::keygen();
         assert!(kg.is_ok());
         let (pk, sk) = kg.unwrap();
 
@@ -348,17 +367,17 @@ mod tests {
         let len: u8 = rng.gen();
         let message = (0..len).map(|_| rng.gen::<u8>()).collect::<Vec<_>>();
 
-        let signing = sp.sign(&message, &sk);
+        let signing = SphincsPlus::sign(&message, &sk);
         assert!(signing.is_ok());
         let signature = signing.unwrap();
 
-        assert!(sp.verify(&signature, &message, &pk).is_ok());
+        assert!(SphincsPlus::verify(&signature, &message, &pk).is_ok());
 
         let mut fake_signature = signature.clone();
         fake_signature.0[0] ^= 1;
 
         assert!(matches!(
-            sp.verify(&fake_signature, &message, &pk),
+            SphincsPlus::verify(&fake_signature, &message, &pk),
             Err(Error::VerificationFailed(_))
         ));
         println!("SPHINCS+ wrapper keygen, signing, and verify tests passed.");
