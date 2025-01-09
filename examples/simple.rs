@@ -175,7 +175,7 @@ async fn simple_dgsp_in_disk() {
     println!("Constructed PublicKey and SecretKey pair for the manager.");
 
     // Now a user chooses a username and requests to join DGSP scheme.
-    let username = "DGSP User 2";
+    let username = "DGSP User 1";
     let (id, cid) = DGSP::join(&skm.msk, username, &plm).await.unwrap();
     // If the above line throws an Err(Error::UsernameAlreadyExists("<USERNAME>")) error, it means
     // you have run this code previously and there already exists a user with the given <USERNAME>.

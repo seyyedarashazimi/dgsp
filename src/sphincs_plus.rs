@@ -106,8 +106,8 @@
 //!   through well-reviewed code.
 //! - **`zeroize`**: Ensures sensitive cryptographic material is securely wiped from memory when no
 //!   longer needed.
-//! - **`serde`**: when `serialization` feature is active for dgsp crate, this wrapper uses `serde`
-//!   `serde_big_array` to serialize the data types.
+//! - **`serde`**: when `serialization` feature is active for dgsp crate, this wrapper uses `serde`,
+//!   `serde_big_array`, and `bincode` to serialize the data types.
 //!
 //! ## Example Walkthrough
 //!
