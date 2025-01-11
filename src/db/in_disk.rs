@@ -2,22 +2,22 @@ use crate::db::{PLMInterface, RevokedListInterface};
 use crate::params::DGSP_POS_BYTES;
 use crate::utils::{bytes_to_u64, u64_to_bytes};
 use crate::Result;
-use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use sled::Transactional;
 use std::fmt::Display;
-use std::ops::Deref;
 use std::path::Path;
+
+/// A typed abort reason for Sled transactions.
+/// Instead of passing magic strings, we'll serialize this enum to JSON.
+#[derive(Serialize, Deserialize, Debug)]
+enum TxAbortReason {
+    IdNotFound(u64),
+    UsernameAlreadyExists(String),
+}
 
 impl From<sled::Error> for crate::Error {
     fn from(e: sled::Error) -> Self {
         Self::DbInternalError(format!("sled error: {}", e))
-    }
-}
-
-impl From<std::io::Error> for crate::Error {
-    fn from(e: std::io::Error) -> Self {
-        Self::DbInternalError(format!("io error: {}", e))
     }
 }
 
@@ -27,31 +27,22 @@ where
 {
     fn from(e: sled::transaction::TransactionError<E>) -> Self {
         match e {
-            sled::transaction::TransactionError::Storage(err) => err.into(), // Handle storage errors
+            sled::transaction::TransactionError::Storage(err) => err.into(),
             sled::transaction::TransactionError::Abort(reason) => {
-                let message = reason.to_string();
-                if message.starts_with("IdNotFound:") {
-                    // Try to parse the number from the message
-                    if let Some(number_str) = message.strip_prefix("IdNotFound:") {
-                        if let Ok(number) = number_str.trim().parse::<u64>() {
-                            return crate::Error::IdNotFound(number);
-                        }
-                    }
+                // Attempt to parse from JSON
+                match serde_json::from_str::<TxAbortReason>(&reason.to_string()) {
+                    Ok(TxAbortReason::IdNotFound(id)) => crate::Error::IdNotFound(id),
+                    Ok(TxAbortReason::UsernameAlreadyExists(name)) => {
+                        crate::Error::UsernameAlreadyExists(name)
+                    },
+                    Err(_) => sled::Error::Unsupported(reason.to_string()).into(),
                 }
-                if message.starts_with("UsernameAlreadyExists:") {
-                    // Parse the username from the message
-                    if let Some(str) = message.strip_prefix("UsernameAlreadyExists:") {
-                        let username = str.trim().parse::<String>().unwrap();
-                        return crate::Error::UsernameAlreadyExists(username);
-                    }
-                }
-                sled::Error::Unsupported(message).into()
             },
         }
     }
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone)]
+#[derive(Serialize, Deserialize, Debug)]
 struct InDiskPLMEntry {
     ctr_certs: u64,
     is_active: bool,
@@ -63,6 +54,7 @@ struct InDiskPLMEntry {
 /// for each user.
 #[derive(Debug, Clone)]
 pub struct InDiskPLM {
+    #[allow(unused)]
     db: sled::Db,
     plme_tree: sled::Tree,
     name_tree: sled::Tree,
@@ -71,9 +63,8 @@ pub struct InDiskPLM {
 
 const NEXT_ID_KEY: &[u8] = b"__next_id";
 
-#[async_trait]
 impl PLMInterface for InDiskPLM {
-    async fn open<P>(path: P) -> Result<Self>
+    fn open<P>(path: P) -> Result<Self>
     where
         P: AsRef<Path> + Send,
     {
@@ -94,7 +85,7 @@ impl PLMInterface for InDiskPLM {
     ///
     /// Returns `Ok(id)` if newly added. Otherwise, throws an `crate::errors::Error` error if given
     /// username already existed, or if an error occurs.
-    async fn add_new_user<S>(&self, username: S) -> Result<u64>
+    fn add_new_user<S>(&self, username: S) -> Result<u64>
     where
         S: AsRef<str> + Display + Send,
     {
@@ -103,8 +94,9 @@ impl PLMInterface for InDiskPLM {
         let new_id = (&self.plme_tree, &self.name_tree, &self.meta_tree).transaction(
             |(ptree, ntree, mtree)| {
                 if ntree.get(username_bytes)?.is_some() {
+                    let reason = TxAbortReason::UsernameAlreadyExists(username.to_string());
                     return Err(sled::transaction::ConflictableTransactionError::Abort(
-                        format!("UsernameAlreadyExists:{}", username),
+                        serde_json::to_string(&reason).unwrap(),
                     ));
                 }
 
@@ -134,7 +126,7 @@ impl PLMInterface for InDiskPLM {
     }
 
     /// Deactivate a user by ID
-    async fn deactivate_id(&self, id: u64) -> Result<()> {
+    fn deactivate_id(&self, id: u64) -> Result<()> {
         let id_key = u64_to_bytes(id);
         self.plme_tree.transaction(|ptree| {
             let val = ptree.get(id_key)?;
@@ -146,8 +138,9 @@ impl PLMInterface for InDiskPLM {
                     .map_err(|_| sled::Error::Unsupported("Serialization error".into()))?;
                 ptree.insert(&id_key, serialized)?;
             } else {
+                let reason = TxAbortReason::IdNotFound(id);
                 return Err(sled::transaction::ConflictableTransactionError::Abort(
-                    format!("IdNotFound:{}", id),
+                    serde_json::to_string(&reason).unwrap(),
                 ));
             }
             Ok(())
@@ -156,7 +149,7 @@ impl PLMInterface for InDiskPLM {
     }
 
     /// Get counter of created certificates for a given user ID
-    async fn get_ctr_id(&self, id: u64) -> Result<u64> {
+    fn get_ctr_id(&self, id: u64) -> Result<u64> {
         let id_key = u64_to_bytes(id);
         if let Some(val) = self.plme_tree.get(id_key)? {
             let entry: InDiskPLMEntry = bincode::deserialize(&val)
@@ -168,7 +161,7 @@ impl PLMInterface for InDiskPLM {
     }
 
     /// Get username by ID
-    async fn get_username(&self, id: u64) -> Result<String> {
+    fn get_username(&self, id: u64) -> Result<String> {
         let id_key = u64_to_bytes(id);
         if let Some(val) = self.plme_tree.get(id_key)? {
             let entry: InDiskPLMEntry = bincode::deserialize(&val)
@@ -180,9 +173,9 @@ impl PLMInterface for InDiskPLM {
     }
 
     /// Check if ID exists
-    async fn id_exists(&self, id: u64) -> Result<bool> {
+    fn id_exists(&self, id: u64) -> Result<bool> {
         let id_key = u64_to_bytes(id);
-        if self.plme_tree.get(id_key)?.is_some() {
+        if self.plme_tree.contains_key(id_key)? {
             Ok(true)
         } else {
             Err(crate::Error::IdNotFound(id))
@@ -190,7 +183,7 @@ impl PLMInterface for InDiskPLM {
     }
 
     /// Check if ID is active
-    async fn id_is_active(&self, id: u64) -> Result<bool> {
+    fn id_is_active(&self, id: u64) -> Result<bool> {
         let id_key = u64_to_bytes(id);
         if let Some(val) = self.plme_tree.get(id_key)? {
             let entry: InDiskPLMEntry = bincode::deserialize(&val)
@@ -206,7 +199,7 @@ impl PLMInterface for InDiskPLM {
     /// Returns `Ok(id)` if request is valid and no error occurs. Otherwise, throws an
     /// `crate::errors::Error` error if current ctr_cert value of the ID plus `add` value exceeds
     /// [`u64::MAX`] bound.
-    async fn increment_ctr_id_by(&self, id: u64, add: u64) -> Result<()> {
+    fn increment_ctr_id_by(&self, id: u64, add: u64) -> Result<()> {
         let id_key = u64_to_bytes(id);
         self.plme_tree.transaction(|ptree| {
             if let Some(val) = ptree.get(id_key)? {
@@ -269,13 +262,12 @@ impl InDiskPLM {
         )?;
         Ok(())
     }
-}
 
-impl Deref for InDiskPLM {
-    type Target = sled::Db;
-
-    fn deref(&self) -> &Self::Target {
-        &self.db
+    #[cfg(feature = "benchmarking")]
+    #[doc(hidden)]
+    pub fn flush_plm(&self) -> Result<()> {
+        self.db.flush()?;
+        Ok(())
     }
 }
 
@@ -285,30 +277,33 @@ pub struct InDiskRevokedList {
     db: sled::Db,
 }
 
-impl Deref for InDiskRevokedList {
-    type Target = sled::Db;
-
-    fn deref(&self) -> &Self::Target {
-        &self.db
-    }
-}
-
-#[async_trait]
 impl RevokedListInterface for InDiskRevokedList {
-    async fn open<P: AsRef<Path> + Send>(path: P) -> Result<Self> {
+    fn open<P: AsRef<Path> + Send>(path: P) -> Result<Self> {
         let path = path.as_ref().join("rl");
         let db = sled::open(&path)?;
         Ok(Self { db })
     }
 
     /// Check if a given pos exists in the RevokedList
-    async fn contains(&self, pos: &[u8]) -> Result<bool> {
-        Ok(self.db.get(pos)?.is_some())
+    fn contains(&self, pos: &[u8]) -> Result<bool> {
+        Ok(self.db.contains_key(pos)?)
     }
 
     /// Insert a given pos into the RevokedList
-    async fn insert(&self, pos: [u8; DGSP_POS_BYTES]) -> Result<()> {
+    fn insert(&self, pos: [u8; DGSP_POS_BYTES]) -> Result<()> {
         self.db.insert(pos, &[])?;
+        Ok(())
+    }
+}
+
+#[cfg(feature = "benchmarking")]
+#[doc(hidden)]
+impl InDiskRevokedList {
+    #[cfg(feature = "benchmarking")]
+    #[doc(hidden)]
+    pub fn clear(&self) -> Result<()> {
+        self.db.flush()?;
+        self.db.clear()?;
         Ok(())
     }
 }
@@ -334,56 +329,47 @@ mod tests {
             .collect()
     }
 
-    #[tokio::test]
-    async fn test_plm_add_username() {
+    #[test]
+    fn test_plm_add_username() {
         let username = random_str(rand::thread_rng().gen_range(1..30));
         let temp_dir = TempDir::new().expect("Failed to create temp dir");
-        let plm = InDiskPLM::open(temp_dir.path().join(TEST_DB_PATH))
-            .await
-            .unwrap();
-        let id = plm.add_new_user(&username).await.unwrap();
+        let plm = InDiskPLM::open(temp_dir.path().join(TEST_DB_PATH)).unwrap();
+        let id = plm.add_new_user(&username).unwrap();
         assert_eq!(id, 0u64);
         assert_eq!(
-            plm.add_new_user(&username).await,
+            plm.add_new_user(&username),
             Err(Error::UsernameAlreadyExists(username.clone()))
         );
-        let id2 = plm
-            .add_new_user(format!("{}2", username).as_str())
-            .await
-            .unwrap();
+        let id2 = plm.add_new_user(format!("{}2", username).as_str()).unwrap();
         assert_eq!(id2, 1u64);
     }
 
-    #[tokio::test]
-    async fn test_plm_id() {
+    #[test]
+    fn test_plm_id() {
         let username = random_str(rand::thread_rng().gen_range(1..30));
         let temp_dir = TempDir::new().expect("Failed to create temp dir");
-        let plm = InDiskPLM::open(temp_dir.path().join(TEST_DB_PATH))
-            .await
-            .unwrap();
-        let id = plm.add_new_user(&username).await.unwrap();
-        assert!(plm.id_exists(id).await.unwrap());
-        assert!(plm.id_is_active(id).await.unwrap());
-        assert_eq!(plm.get_ctr_id(id).await.unwrap(), 0u64);
-        assert_eq!(plm.get_username(id).await.unwrap(), username);
-        plm.deactivate_id(id).await.unwrap();
-        assert!(!plm.id_is_active(id).await.unwrap());
+        let plm = InDiskPLM::open(temp_dir.path().join(TEST_DB_PATH)).unwrap();
+        let id = plm.add_new_user(&username).unwrap();
+        assert!(plm.id_exists(id).unwrap());
+        assert!(plm.id_is_active(id).unwrap());
+        assert_eq!(plm.get_ctr_id(id).unwrap(), 0u64);
+        assert_eq!(plm.get_username(id).unwrap(), username);
+        plm.deactivate_id(id).unwrap();
+        assert!(!plm.id_is_active(id).unwrap());
     }
 
-    #[tokio::test]
-    async fn test_plm_ctr_cert() {
+    #[test]
+    fn test_plm_ctr_cert() {
         let username = random_str(rand::thread_rng().gen_range(1..30));
         let temp_dir = TempDir::new().expect("Failed to create temp dir");
-        let plm = InDiskPLM::open(temp_dir.path().join(TEST_DB_PATH))
-            .await
-            .unwrap();
-        let id = plm.add_new_user(&username).await.unwrap();
-        plm.increment_ctr_id_by(id, 1u64).await.unwrap();
-        assert_eq!(plm.get_ctr_id(id).await.unwrap(), 1u64);
+        let plm = InDiskPLM::open(temp_dir.path().join(TEST_DB_PATH)).unwrap();
+        let id = plm.add_new_user(&username).unwrap();
+        plm.increment_ctr_id_by(id, 1u64).unwrap();
+        assert_eq!(plm.get_ctr_id(id).unwrap(), 1u64);
 
         let error_prefix = "sled error: Unsupported: ";
         assert_eq!(
-            plm.increment_ctr_id_by(id, u64::MAX).await,
+            plm.increment_ctr_id_by(id, u64::MAX),
             Err(Error::DbInternalError(format!(
                 "{}Exceeds max certificate generation for the user {}",
                 error_prefix, id
@@ -391,16 +377,14 @@ mod tests {
         );
     }
 
-    #[tokio::test]
-    async fn test_revoked_list() {
+    #[test]
+    fn test_revoked_list() {
         let temp_dir = TempDir::new().expect("Failed to create temp dir");
-        let rl = InDiskRevokedList::open(temp_dir.path().join(TEST_DB_PATH))
-            .await
-            .unwrap();
+        let rl = InDiskRevokedList::open(temp_dir.path().join(TEST_DB_PATH)).unwrap();
         let mut pos = [0u8; DGSP_POS_BYTES];
         OsRng.fill_bytes(&mut pos);
-        assert!(!rl.contains(&pos).await.unwrap());
-        rl.insert(pos).await.unwrap();
-        assert!(rl.contains(&pos).await.unwrap());
+        assert!(!rl.contains(&pos).unwrap());
+        rl.insert(pos).unwrap();
+        assert!(rl.contains(&pos).unwrap());
     }
 }

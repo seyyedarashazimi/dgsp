@@ -1,7 +1,6 @@
 use crate::db::{PLMInterface, RevokedListInterface};
 use crate::params::DGSP_POS_BYTES;
 use crate::Result;
-use async_trait::async_trait;
 use std::collections::HashSet;
 use std::fmt::Display;
 use std::path::Path;
@@ -43,9 +42,8 @@ pub struct InMemoryPLM {
     data: Arc<Mutex<InMemoryPLMData>>,
 }
 
-#[async_trait]
 impl PLMInterface for InMemoryPLM {
-    async fn open<P: AsRef<Path> + Send>(_: P) -> Result<Self> {
+    fn open<P: AsRef<Path> + Send>(_: P) -> Result<Self> {
         Ok(Self {
             data: Arc::new(Mutex::new(InMemoryPLMData::default())),
         })
@@ -55,7 +53,7 @@ impl PLMInterface for InMemoryPLM {
     ///
     /// Returns `Ok(id)` if newly added. Otherwise, throws an `crate::errors::Error` error if given
     /// username already existed, or if an error occurs.
-    async fn add_new_user<S>(&self, username: S) -> Result<u64>
+    fn add_new_user<S>(&self, username: S) -> Result<u64>
     where
         S: AsRef<str> + Display + Send,
     {
@@ -75,7 +73,7 @@ impl PLMInterface for InMemoryPLM {
     }
 
     /// Deactivate a user by ID
-    async fn deactivate_id(&self, id: u64) -> Result<()> {
+    fn deactivate_id(&self, id: u64) -> Result<()> {
         let mut data = self.data.lock()?;
         data.ensure_id_exists(id)?;
         data.vec[id as usize].is_active = false;
@@ -83,28 +81,28 @@ impl PLMInterface for InMemoryPLM {
     }
 
     /// Get counter of created certificates for a given user ID
-    async fn get_ctr_id(&self, id: u64) -> Result<u64> {
+    fn get_ctr_id(&self, id: u64) -> Result<u64> {
         let data = self.data.lock()?;
         data.ensure_id_exists(id)?;
         Ok(data.vec[id as usize].ctr_certs)
     }
 
     /// Get username by ID
-    async fn get_username(&self, id: u64) -> Result<String> {
+    fn get_username(&self, id: u64) -> Result<String> {
         let data = self.data.lock()?;
         data.ensure_id_exists(id)?;
         Ok(data.vec[id as usize].username.clone())
     }
 
     /// Check if ID exists
-    async fn id_exists(&self, id: u64) -> Result<bool> {
+    fn id_exists(&self, id: u64) -> Result<bool> {
         let data = self.data.lock()?;
         data.ensure_id_exists(id)?;
         Ok(true)
     }
 
     /// Check if ID is active
-    async fn id_is_active(&self, id: u64) -> Result<bool> {
+    fn id_is_active(&self, id: u64) -> Result<bool> {
         let data = self.data.lock()?;
         data.ensure_id_exists(id)?;
         Ok(data.vec[id as usize].is_active)
@@ -115,7 +113,7 @@ impl PLMInterface for InMemoryPLM {
     /// Returns `Ok(id)` if request is valid and no error occurs. Otherwise, throws an
     /// `crate::errors::Error` error if current ctr_cert value of the ID plus `add` value exceeds
     /// [`u64::MAX`] bound.
-    async fn increment_ctr_id_by(&self, id: u64, add: u64) -> Result<()> {
+    fn increment_ctr_id_by(&self, id: u64, add: u64) -> Result<()> {
         let mut data = self.data.lock()?;
         if data.vec[id as usize].ctr_certs > u64::MAX - add {
             return Err(crate::Error::DbInternalError(format!(
@@ -158,20 +156,19 @@ impl InMemoryPLM {
 #[derive(Default)]
 pub struct InMemoryRevokedList(Arc<Mutex<HashSet<[u8; DGSP_POS_BYTES]>>>);
 
-#[async_trait]
 impl RevokedListInterface for InMemoryRevokedList {
-    async fn open<P: AsRef<Path> + Send>(_: P) -> Result<Self> {
+    fn open<P: AsRef<Path> + Send>(_: P) -> Result<Self> {
         Ok(InMemoryRevokedList::default())
     }
 
     /// Check if a given pos exists in the RevokedList
-    async fn contains(&self, pos: &[u8]) -> Result<bool> {
+    fn contains(&self, pos: &[u8]) -> Result<bool> {
         let data = self.0.lock()?;
         Ok(data.contains(pos))
     }
 
     /// Insert a given pos into the RevokedList
-    async fn insert(&self, pos: [u8; DGSP_POS_BYTES]) -> Result<()> {
+    fn insert(&self, pos: [u8; DGSP_POS_BYTES]) -> Result<()> {
         let mut data = self.0.lock()?;
         data.insert(pos);
         Ok(())
@@ -198,56 +195,47 @@ mod tests {
             .collect()
     }
 
-    #[tokio::test]
-    async fn test_plm_add_username() {
+    #[test]
+    fn test_plm_add_username() {
         let username = random_str(rand::thread_rng().gen_range(1..30));
         let temp_dir = TempDir::new().expect("Failed to create temp dir");
-        let plm = InMemoryPLM::open(temp_dir.path().join(TEST_DB_PATH))
-            .await
-            .unwrap();
-        let id = plm.add_new_user(&username).await.unwrap();
+        let plm = InMemoryPLM::open(temp_dir.path().join(TEST_DB_PATH)).unwrap();
+        let id = plm.add_new_user(&username).unwrap();
         assert_eq!(id, 0u64);
         assert_eq!(
-            plm.add_new_user(&username).await,
+            plm.add_new_user(&username),
             Err(Error::UsernameAlreadyExists(username.clone()))
         );
-        let id2 = plm
-            .add_new_user(format!("{}2", username).as_str())
-            .await
-            .unwrap();
+        let id2 = plm.add_new_user(format!("{}2", username).as_str()).unwrap();
         assert_eq!(id2, 1u64);
     }
 
-    #[tokio::test]
-    async fn test_plm_id() {
+    #[test]
+    fn test_plm_id() {
         let username = random_str(rand::thread_rng().gen_range(1..30));
         let temp_dir = TempDir::new().expect("Failed to create temp dir");
-        let plm = InMemoryPLM::open(temp_dir.path().join(TEST_DB_PATH))
-            .await
-            .unwrap();
-        let id = plm.add_new_user(&username).await.unwrap();
-        assert!(plm.id_exists(id).await.unwrap());
-        assert!(plm.id_is_active(id).await.unwrap());
-        assert_eq!(plm.get_ctr_id(id).await.unwrap(), 0u64);
-        assert_eq!(plm.get_username(id).await.unwrap(), username);
-        plm.deactivate_id(id).await.unwrap();
-        assert!(!plm.id_is_active(id).await.unwrap());
+        let plm = InMemoryPLM::open(temp_dir.path().join(TEST_DB_PATH)).unwrap();
+        let id = plm.add_new_user(&username).unwrap();
+        assert!(plm.id_exists(id).unwrap());
+        assert!(plm.id_is_active(id).unwrap());
+        assert_eq!(plm.get_ctr_id(id).unwrap(), 0u64);
+        assert_eq!(plm.get_username(id).unwrap(), username);
+        plm.deactivate_id(id).unwrap();
+        assert!(!plm.id_is_active(id).unwrap());
     }
 
-    #[tokio::test]
-    async fn test_plm_ctr_cert() {
+    #[test]
+    fn test_plm_ctr_cert() {
         let username = random_str(rand::thread_rng().gen_range(1..30));
         let temp_dir = TempDir::new().expect("Failed to create temp dir");
-        let plm = InMemoryPLM::open(temp_dir.path().join(TEST_DB_PATH))
-            .await
-            .unwrap();
-        let id = plm.add_new_user(&username).await.unwrap();
-        plm.increment_ctr_id_by(id, 1u64).await.unwrap();
-        assert_eq!(plm.get_ctr_id(id).await.unwrap(), 1u64);
+        let plm = InMemoryPLM::open(temp_dir.path().join(TEST_DB_PATH)).unwrap();
+        let id = plm.add_new_user(&username).unwrap();
+        plm.increment_ctr_id_by(id, 1u64).unwrap();
+        assert_eq!(plm.get_ctr_id(id).unwrap(), 1u64);
 
         let error_prefix = "";
         assert_eq!(
-            plm.increment_ctr_id_by(id, u64::MAX).await,
+            plm.increment_ctr_id_by(id, u64::MAX),
             Err(Error::DbInternalError(format!(
                 "{}Exceeds max certificate generation for the user {}",
                 error_prefix, id
@@ -255,16 +243,14 @@ mod tests {
         );
     }
 
-    #[tokio::test]
-    async fn test_revoked_list() {
+    #[test]
+    fn test_revoked_list() {
         let temp_dir = TempDir::new().expect("Failed to create temp dir");
-        let rl = InMemoryRevokedList::open(temp_dir.path().join(TEST_DB_PATH))
-            .await
-            .unwrap();
+        let rl = InMemoryRevokedList::open(temp_dir.path().join(TEST_DB_PATH)).unwrap();
         let mut pos = [0u8; DGSP_POS_BYTES];
         OsRng.fill_bytes(&mut pos);
-        assert!(!rl.contains(&pos).await.unwrap());
-        rl.insert(pos).await.unwrap();
-        assert!(rl.contains(&pos).await.unwrap());
+        assert!(!rl.contains(&pos).unwrap());
+        rl.insert(pos).unwrap();
+        assert!(rl.contains(&pos).unwrap());
     }
 }

@@ -1,4 +1,4 @@
-use crate::params::{DGSP_N, DGSP_POS_BYTES, DGSP_USER_BYTES};
+use crate::params::{DGSP_N, DGSP_USER_BYTES};
 use crate::sphincs_plus::SPX_N;
 use crate::wots_plus::adrs::Adrs;
 use sha3::{
@@ -26,17 +26,9 @@ impl DGSPHasher {
         reader.read(output[..DGSP_N].as_mut());
     }
 
-    pub(crate) fn hash_m(
-        output: &mut [u8],
-        spx_r: &[u8],
-        sgn_seed: &[u8],
-        dgsp_pos: &[u8],
-        message: &[u8],
-    ) {
+    pub(crate) fn hash_m(output: &mut [u8], sgn_seed: &[u8], message: &[u8]) {
         let mut hasher = Shake256::default();
-        hasher.update(spx_r[..SPX_N].as_ref());
         hasher.update(sgn_seed[..SPX_N].as_ref());
-        hasher.update(dgsp_pos[..DGSP_POS_BYTES].as_ref());
         hasher.update(message);
         let mut reader = hasher.finalize_xof();
         reader.read(output[..SPX_N].as_mut());
