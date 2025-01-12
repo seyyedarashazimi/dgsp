@@ -271,11 +271,8 @@ impl DGSP {
         seed_user: &[u8; SPX_N],
         cert: ([u8; DGSP_POS_BYTES], SphincsPlusSignature),
     ) -> DGSPSignature {
-        let mut hm = [0u8; SPX_N];
-        DGSPHasher::hash_m(&mut hm, &wots_rand.wots_sgn_seed, message);
-
         let wp = WotsPlus::new_from_rand(&wots_rand.wots_adrs_rand, &wots_rand.wots_sgn_seed);
-        let wots_sig = wp.sign_from_sk_seed(&hm, seed_user);
+        let wots_sig = wp.sign_from_sk_seed(&message, seed_user);
 
         DGSPSignature {
             wots_sig,
@@ -294,13 +291,9 @@ impl DGSP {
         if revoked_list.contains(&sig.pos)? {
             return Err(VerificationError::RevokedSignature)?;
         }
-
-        let mut hm = [0u8; SPX_N];
-        DGSPHasher::hash_m(&mut hm, &sig.wots_rand.wots_sgn_seed, message);
-
         let wp =
             WotsPlus::new_from_rand(&sig.wots_rand.wots_adrs_rand, &sig.wots_rand.wots_sgn_seed);
-        let wots_pk = wp.pk_from_sig(&sig.wots_sig, &hm);
+        let wots_pk = wp.pk_from_sig(&sig.wots_sig, &message);
 
         let mut spx_msg = [0u8; SPX_WOTS_PK_BYTES + DGSP_POS_BYTES];
         spx_msg[..SPX_WOTS_PK_BYTES].copy_from_slice(wots_pk.as_ref());

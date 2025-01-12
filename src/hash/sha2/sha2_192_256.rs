@@ -32,9 +32,10 @@ impl DGSPHasher {
         output[..DGSP_N].copy_from_slice(&hasher.finalize()[..DGSP_N]);
     }
 
-    pub(crate) fn hash_m(output: &mut [u8], sgn_seed: &[u8], message: &[u8]) {
-        let mut hasher = Sha512::default();
-        hasher.update(sgn_seed[..SPX_N].as_ref());
+    /// Calculates hash of message. out = SHA2-512(pub_seed || message)
+    /// /// Normally, pub_seed is sgn_seed in DGSP.
+    pub(crate) fn hash_m(&self, output: &mut [u8], message: &[u8]) {
+        let mut hasher = self.sha512.clone();
         hasher.update(message);
         output[..SPX_N].copy_from_slice(&hasher.finalize()[..SPX_N]);
     }

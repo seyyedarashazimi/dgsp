@@ -125,8 +125,10 @@ impl WotsPlus {
     ///
     /// A `[u8; SPX_WOTS_BYTES]` array containing the generated signature.
     pub fn sign(&self, message: &[u8], sk: &[u8]) -> [u8; SPX_WOTS_BYTES] {
+        let mut hm = [0u8; SPX_N];
+        self.hash_m(&mut hm, message);
         let mut adrs = Adrs::new_full_from_rand(WotsHash, &self.adrs_rand);
-        self.gen_sig(sk, 0, &mut adrs, message)
+        self.gen_sig(sk, 0, &mut adrs, &hm)
     }
 
     /// Signs a message using the secret key seed (`sk_seed`).
@@ -143,8 +145,10 @@ impl WotsPlus {
     ///
     /// A `[u8; SPX_WOTS_BYTES]` array containing the generated signature.
     pub fn sign_from_sk_seed(&self, message: &[u8], sk_seed: &[u8; SPX_N]) -> [u8; SPX_WOTS_BYTES] {
+        let mut hm = [0u8; SPX_N];
+        self.hash_m(&mut hm, message);
         let mut adrs = Adrs::new_full_from_rand(WotsPrf, &self.adrs_rand);
-        self.gen_sig_from_sk_seed(sk_seed, 0, &mut adrs, message)
+        self.gen_sig_from_sk_seed(sk_seed, 0, &mut adrs, &hm)
     }
 
     /// Verifies a WOTS+ signature for a given message and public key.
@@ -165,8 +169,10 @@ impl WotsPlus {
     /// * `true` - The signature is valid.
     /// * `false` - The signature is invalid.
     pub fn verify(&self, signature: &[u8], message: &[u8], pk: &[u8]) -> bool {
+        let mut hm = [0u8; SPX_N];
+        self.hash_m(&mut hm, message);
         let mut adrs = Adrs::new_full_from_rand(WotsHash, &self.adrs_rand);
-        let calculated_pk = self.wots_pk_from_sig(signature, message, 0, &mut adrs);
+        let calculated_pk = self.wots_pk_from_sig(signature, &hm, 0, &mut adrs);
         calculated_pk == pk
     }
 
@@ -184,8 +190,14 @@ impl WotsPlus {
     ///
     /// A `[u8; SPX_WOTS_PK_BYTES]` array containing the computed public key.
     pub fn pk_from_sig(&self, signature: &[u8], message: &[u8]) -> [u8; SPX_WOTS_PK_BYTES] {
+        let mut hm = [0u8; SPX_N];
+        self.hash_m(&mut hm, message);
         let mut adrs = Adrs::new_full_from_rand(WotsHash, &self.adrs_rand);
-        self.wots_pk_from_sig(signature, message, 0, &mut adrs)
+        self.wots_pk_from_sig(signature, &hm, 0, &mut adrs)
+    }
+
+    fn hash_m(&self, output: &mut [u8], message: &[u8]) {
+        self.hasher.hash_m(output, message);
     }
 
     /// Computes the chaining function.
@@ -268,7 +280,7 @@ impl WotsPlus {
     fn wots_pk_from_sig(
         &self,
         sig: &[u8],
-        msg: &[u8],
+        hm: &[u8],
         leaf_idx: u32,
         adrs: &mut Adrs,
     ) -> [u8; SPX_WOTS_BYTES] {
@@ -276,7 +288,7 @@ impl WotsPlus {
         let mut pk_adrs = *adrs;
 
         let mut lengths = [0_u32; SPX_WOTS_LEN];
-        Self::chain_lengths(lengths.as_mut(), msg);
+        Self::chain_lengths(lengths.as_mut(), hm);
 
         adrs.set_type(WotsHash);
         for i in 0..SPX_WOTS_LEN {
@@ -351,14 +363,14 @@ impl WotsPlus {
         sk: &[u8],
         leaf_idx: u32,
         adrs: &mut Adrs,
-        message: &[u8],
+        hm: &[u8],
     ) -> [u8; SPX_WOTS_BYTES] {
         let mut sig_buf = [0_u8; SPX_WOTS_BYTES];
         let mut buf_index: usize;
 
         // Calculate chain steps for the given message
         let mut steps = [0_u32; SPX_WOTS_LEN];
-        Self::chain_lengths(steps.as_mut(), message);
+        Self::chain_lengths(steps.as_mut(), hm);
 
         adrs.set_keypair_addr(leaf_idx);
         adrs.set_type(WotsHash);
@@ -382,7 +394,7 @@ impl WotsPlus {
         sk_seed: &[u8],
         leaf_idx: u32,
         adrs: &mut Adrs,
-        message: &[u8],
+        hm: &[u8],
     ) -> [u8; SPX_WOTS_BYTES] {
         let mut sk_buf = [0_u8; SPX_N];
         let mut sig_buf = [0_u8; SPX_WOTS_BYTES];
@@ -390,7 +402,7 @@ impl WotsPlus {
 
         // Calculate chain steps for the given message
         let mut steps = [0_u32; SPX_WOTS_LEN];
-        Self::chain_lengths(steps.as_mut(), message);
+        Self::chain_lengths(steps.as_mut(), hm);
 
         let mut sk_adrs = *adrs;
 

@@ -26,9 +26,11 @@ impl DGSPHasher {
         reader.read(output[..DGSP_N].as_mut());
     }
 
-    pub(crate) fn hash_m(output: &mut [u8], sgn_seed: &[u8], message: &[u8]) {
+    /// Calculates hash of message, i.e. out = SHAKE256(pub_seed || message).
+    /// Normally, pub_seed is sgn_seed in DGSP.
+    pub(crate) fn hash_m(&self, output: &mut [u8], message: &[u8]) {
         let mut hasher = Shake256::default();
-        hasher.update(sgn_seed[..SPX_N].as_ref());
+        hasher.update(self.pub_seed.as_ref());
         hasher.update(message);
         let mut reader = hasher.finalize_xof();
         reader.read(output[..SPX_N].as_mut());
