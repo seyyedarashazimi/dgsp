@@ -2,7 +2,7 @@
 
 ## Overview
 
-DGSP is an efficient post-quantum, fully-dynamic group signature scheme implemented purely in Rust. It leverages the
+DGSP is an efficient scalable post-quantum, fully-dynamic group signature scheme implemented purely in Rust. It leverages the
 SPHINCS+ signature scheme to provide a secure, scalable, and efficient group signature mechanism that is
 future-proof against quantum adversaries.
 
@@ -11,7 +11,7 @@ DGSP supports:
 - A vast user base of up to 2<sup>64</sup> users.
 - Compact keypair and signature sizes.
 - Efficient signing and verification processes.
-- Proven security guarantees for unforgeability, anonymity, and traceability.
+- Proven security guarantees for correctness, unforgeability, anonymity, and traceability.
 
 This implementation is optimized for performance and modularity, making it a powerful choice for cryptographic research
 and real-world applications requiring long-term security.
@@ -80,25 +80,26 @@ bibtex cite
 - **Opening**:
   - Ability to trace signatures to specific users by the manager without compromising anonymity for other parties.
 - **Revocation**:
-    - Efficient user, signature, and certificate revocation mechanism.
+    - Efficient revocation mechanism, including revoking a user, their corresponding signatures, and previously-generated certificates.
 
 ### Cryptographic Primitives
 
 - **Efficient Hash-Based Cryptographic Operations**:
-  - Implements SHA-2 and SHAKE-based variants as per SPHINCS+ parameters.
+  - Takes benefit from SHA-2 and SHAKE-based variants as per SPHINCS+ parameters.
 - **SPHINCS+ Wrapper**:
   - Simplifies the use of SPHINCS+ by providing utilities for key generation, signing, and verification.
 - **WOTS+ (Winternitz One-Time Signature Plus)**:
   - Serves as a base signing primitive for DGSP.
-  - Support for unique address derivation to ensure resistance against multi-target attacks.
-- **Zeroize Data**:
-  - Ensures sensitive cryptographic material is securely wiped from memory when no longer needed.
+  - Supports unique address derivation to ensure resistance against multi-target attacks.
+- **AES-256**:
+  - 
 
 ### Security
 
-- Built on **SPHINCS+**, a stateless hash-based signature scheme.
-- Resistant to quantum adversaries.
-- Ensures **user anonymity**, **unforgeability**, and **traceability**.
+- is Built on **SPHINCS+**, a stateless hash-based signature scheme.
+- is Resistant to quantum adversaries.
+- Provides **user anonymity**, **unforgeability**, **traceability**, and **correctness**.
+- Ensures sensitive cryptographic material is securely wiped from memory when no longer needed by zeroizing them.
 
 ### Scalability and Efficiency
 

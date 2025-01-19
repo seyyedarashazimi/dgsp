@@ -1,10 +1,10 @@
 /target
 .vscode
 .idea
-
 Cargo.lock
 /database
 /test_db
 temp_example_db_*
 dgsp_sphincs_*
 /examples/simple_db
+/benches/log_*/

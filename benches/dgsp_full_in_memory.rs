@@ -15,7 +15,7 @@ mod bench_utils;
 
 const MSK: [u8; DGSP_N] = [170_u8; DGSP_N];
 const GROUP_SIZE: u64 = 1 << 10;
-const CERTIFICATE_ISSUED_SIZE: usize = 1 << 0; // batch size
+const CERTIFICATE_ISSUED_SIZE: usize = 100;
 const TWEAK_USERS_SIZE: u64 = 10;
 
 fn initialize_plm_with_users() -> InMemoryPLM {

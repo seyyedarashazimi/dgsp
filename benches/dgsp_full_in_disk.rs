@@ -16,7 +16,7 @@ mod bench_utils;
 
 const MSK: [u8; DGSP_N] = [170_u8; DGSP_N];
 const GROUP_SIZE: u64 = 1 << 10;
-const CERTIFICATE_ISSUED_SIZE: usize = 1 << 0; // batch size
+const CERTIFICATE_ISSUED_SIZE: usize = 1;
 const TWEAK_USERS_SIZE: u64 = 10;
 
 fn path() -> PathBuf {
@@ -39,6 +39,7 @@ fn initialize_plm_with_users() -> InDiskPLM {
             DGSP::join(&DGSPMSK::from(MSK), &u.to_string(), &plm).unwrap();
         });
     }
+    plm.flush_plm().unwrap();
 
     plm
 }

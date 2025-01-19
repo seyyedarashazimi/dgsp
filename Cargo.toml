@@ -2,10 +2,17 @@
 name = "dgsp"
 version = "0.1.0"
 edition = "2021"
+rust-version = "1.63.0"
+description = "DGSP: An Efficient Scalable Post-Quantum Fully-Dynamic Group Signature Scheme Using SPHINCS+"
+readme = "README.md"
+authors = ["Seyyed Arash Azimi <arashazimi7@gmail.com>"]
+license = "MIT"
+repository = "https://github.com/seyyedarashazimi/dgsp/"
+keywords = ["cryptography", "post-quantum", "signature"]
+categories = ["cryptography", "no-std"]
 
 [dependencies]
 aes = { version = "0.8.4" }
-async-trait = { version = "0.1.83" }
 pqcrypto-sphincsplus = { version = "0.7.0", features = ["serialization"] }
 pqcrypto-traits = { version = "0.3.5" }
 rand = { version = "0.8.5", features = ["std"] }
@@ -23,9 +30,7 @@ sled = { version = "0.34", optional = true }
 
 [dev-dependencies]
 criterion = { version = "0.5.1", features = ["async_futures"] }
-tempfile = { version = "3.14" }
-tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
-futures = { version = "0.3.31" }
+tempfile = { version = "3.15" }
 
 [profile.bench]
 opt-level = 3
@@ -40,12 +45,10 @@ name = "dgsp_full_in_memory"
 harness = false
 
 [features]
+benchmarking = []
 in-disk = ["sled", "bincode", "serialization", "serde_json"]
 in-memory = []
-serialization = [
-    "serde",
-    "serde-big-array",
-]
+serialization = ["serde", "serde-big-array"]
 sphincs_sha2_128f = ["sha2"]
 sphincs_sha2_128s = ["sha2"]
 sphincs_sha2_192f = ["sha2"]
@@ -58,6 +61,5 @@ sphincs_shake_192f = ["sha3"]
 sphincs_shake_192s = ["sha3"]
 sphincs_shake_256f = ["sha3"]
 sphincs_shake_256s = ["sha3"]
-benchmarking = []
 
 default = ["sphincs_shake_256f", "serialization", "in-disk", "in-memory", "benchmarking"]
