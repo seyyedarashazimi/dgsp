@@ -272,7 +272,7 @@ impl DGSP {
         cert: ([u8; DGSP_POS_BYTES], SphincsPlusSignature),
     ) -> DGSPSignature {
         let wp = WotsPlus::new_from_rand(&wots_rand.wots_adrs_rand, &wots_rand.wots_sgn_seed);
-        let wots_sig = wp.sign_from_sk_seed(&message, seed_user);
+        let wots_sig = wp.sign_from_sk_seed(message, seed_user);
 
         DGSPSignature {
             wots_sig,
@@ -293,7 +293,7 @@ impl DGSP {
         }
         let wp =
             WotsPlus::new_from_rand(&sig.wots_rand.wots_adrs_rand, &sig.wots_rand.wots_sgn_seed);
-        let wots_pk = wp.pk_from_sig(&sig.wots_sig, &message);
+        let wots_pk = wp.pk_from_sig(&sig.wots_sig, message);
 
         let mut spx_msg = [0u8; SPX_WOTS_PK_BYTES + DGSP_POS_BYTES];
         spx_msg[..SPX_WOTS_PK_BYTES].copy_from_slice(wots_pk.as_ref());
@@ -350,7 +350,6 @@ mod tests {
         // Create user u1 and join
         let seed_u1 = DGSP::keygen_user();
         let username_u1 = random_str(10);
-        // let username_u1 = "0";
         let (id_u1, cid_u1) = DGSP::join(&skm.msk, username_u1.as_str(), &plm).unwrap();
 
         // Create a batch of CSR
@@ -422,7 +421,6 @@ mod tests {
         // Create user u1 and join
         let seed_u1 = DGSP::keygen_user();
         let username_u1 = random_str(10);
-        // let username_u1 = "0";
         let (id_u1, cid_u1) = DGSP::join(&skm.msk, username_u1.as_str(), &plm).unwrap();
 
         // Create a batch of CSR

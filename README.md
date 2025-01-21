@@ -69,18 +69,12 @@ bibtex cite
 
 ### Core Functionalities
 
-- **Key Generation**:
-    - Manager and user key generation.
-- **Joining**:
-    - Secure user onboarding via cryptographically generated identifiers.
-- **Signing**:
-    - Message signing using efficient hash-based cryptographic primitives and pre-computed certificates.
-- **Verification**:
-    - Signature verification for authenticity and validity.
-- **Opening**:
-  - Ability to trace signatures to specific users by the manager without compromising anonymity for other parties.
-- **Revocation**:
-    - Efficient revocation mechanism, including revoking a user, their corresponding signatures, and previously-generated certificates.
+- **Key Generation**: Manager and user key generation.
+- **Joining**: Secure user onboarding via cryptographically generated identifiers.
+- **Signing**: Message signing using efficient hash-based cryptographic primitives and pre-computed certificates.
+- **Verification**: Signature verification for authenticity and validity.
+- **Opening**: Ability to trace signatures to specific users by the manager without compromising anonymity for other parties.
+- **Revocation**: Efficient revocation mechanism, including revoking a user, their corresponding signatures, and previously-generated certificates.
 
 ### Cryptographic Primitives
 
@@ -111,7 +105,7 @@ bibtex cite
 ### Storage Interfaces
 
 - **PLMInterface** (Private List Manager Interface):
-  - Handles user-related data such as usernames, activity status, and certificate counters.
+  - Stores user-related data such as usernames, activity status, and certificate counters.
   - Provides functionality for adding new users, deactivating users, managing counters for issued certificates, and retrieving user information by ID or username.
   - Supports in-memory and in-disk storage backends for flexibility. 
   - Decouples the DGSP from the storage implementation, enabling integration with other database systems.
@@ -130,10 +124,8 @@ The library itself provides in-memory and in-disk implementations for the above 
 
 ### Prerequisites
 
-Ensure you have the following tools installed:
-
-- Rust (edition 2021 or later). Install via [rustup](https://rustup.rs/).
-- Cargo (comes bundled with Rust).
+DGSP is fully implemented in Rust. 
+Install Rust (version>=1.63.0) via [rustup](https://rustup.rs/).
 
 ### Add DGSP to Your Project
 
@@ -244,7 +236,7 @@ Revoke a user and their associated certificates:
 DGSP::revoke(&skm.msk, &plm, vec![id], &revoked_list).unwrap();
 ```
 
-To learn more, refer to the `examples/simple.rs` for more info. One can run the `simple.rs` example for a specific sphincs feature like this:
+To learn more, refer to the `examples/simple.rs` for additional information. One can run the `simple.rs` example for a specific sphincs feature via:
 
 ```bash
 cargo run --example simple --no-default-features --features "in-disk in-memory sphincs_shake_192f" --release

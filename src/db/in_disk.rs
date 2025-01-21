@@ -8,7 +8,6 @@ use std::fmt::Display;
 use std::path::Path;
 
 /// A typed abort reason for Sled transactions.
-/// Instead of passing magic strings, we'll serialize this enum to JSON.
 #[derive(Serialize, Deserialize, Debug)]
 enum TxAbortReason {
     IdNotFound(u64),

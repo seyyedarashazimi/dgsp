@@ -35,7 +35,7 @@ pub enum Error {
     #[error("Signature verification failed: {0}")]
     VerificationFailed(#[from] VerificationError),
     /// Represents an internal error in the database, with a descriptive error message.
-    /// This can also be treated as user-provided error type that indicates the any error caused by
+    /// This can also be treated as user-provided error type that indicates any error caused by
     /// the implemented database.
     #[error("Database internal error: {0}")]
     DbInternalError(String),
