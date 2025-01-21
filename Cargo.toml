@@ -9,13 +9,13 @@ authors = ["Seyyed Arash Azimi <arashazimi7@gmail.com>"]
 license = "MIT"
 repository = "https://github.com/seyyedarashazimi/dgsp/"
 keywords = ["cryptography", "post-quantum", "signature"]
-categories = ["cryptography", "no-std"]
+categories = ["cryptography"]
 
 [dependencies]
 aes = { version = "0.8.4" }
 pqcrypto-sphincsplus = { version = "0.7.0", features = ["serialization"] }
 pqcrypto-traits = { version = "0.3.5" }
-rand = { version = "0.8.5", features = ["std"] }
+rand = { version = "0.8.5" }
 rayon = { version = "1.10.0" }
 thiserror = { version = "2" }
 zeroize = { version = "1.8.1", features = ["zeroize_derive"] }
@@ -29,7 +29,7 @@ sha3 = { version = "0.10.8", optional = true }
 sled = { version = "0.34", optional = true }
 
 [dev-dependencies]
-criterion = { version = "0.5.1", features = ["async_futures"] }
+criterion = { version = "0.5" }
 tempfile = { version = "3.15" }
 
 [profile.bench]
