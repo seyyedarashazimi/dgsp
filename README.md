@@ -12,6 +12,7 @@ DGSP supports:
 - Compact keypair and signature sizes.
 - Efficient signing and verification processes.
 - Proven security guarantees for correctness, unforgeability, anonymity, and traceability.
+- Manager behavior can be checked and judged.
 
 This implementation is optimized for performance and modularity, making it a powerful choice for cryptographic research
 and real-world applications requiring long-term security.
@@ -75,6 +76,7 @@ bibtex cite
 - **Verification**: Signature verification for authenticity and validity.
 - **Opening**: Ability to trace signatures to specific users by the manager without compromising anonymity for other parties.
 - **Revocation**: Efficient revocation mechanism, including revoking a user, their corresponding signatures, and previously-generated certificates.
+- **Check Manager**: Evaluate manager behavior and make sure manager creates certificates and opens a given signature to an ID correctly.
 
 ### Cryptographic Primitives
 
@@ -85,7 +87,7 @@ bibtex cite
 - **WOTS+ (Winternitz One-Time Signature Plus)**:
   - Serves as a base signing primitive for DGSP.
   - Supports unique address derivation to ensure resistance against multi-target attacks.
-- **AES-256**:
+- **AES**:
   - Plays the role of a strong pseudorandom permutation for traceability.
 
 ### Security
@@ -94,6 +96,7 @@ bibtex cite
 - Is resistant to quantum adversaries.
 - Provides **user anonymity**, **unforgeability**, **traceability**, and **correctness**.
 - Ensures sensitive cryptographic material is securely wiped from memory when no longer needed by zeroizing them.
+- Does not assume a trusted manager as manager can be audited as well.
 
 ### Scalability and Efficiency
 
@@ -101,6 +104,7 @@ bibtex cite
 - Addition and revocation of new users are seamless and efficient.
 - Provides in-memory and in-disk storage backends.
 - Parallelized operations using rayon crate for improved performance.
+- No setup and initialization time needed.
 
 ### Storage Interfaces
 
@@ -124,7 +128,7 @@ The library itself provides in-memory and in-disk implementations for the above 
 
 ### Prerequisites
 
-DGSP is fully implemented in Rust. 
+DGSP is fully implemented in Rust.
 Install Rust (version>=1.63.0) via [rustup](https://rustup.rs/).
 
 ### Add DGSP to Your Project
@@ -146,7 +150,7 @@ dgsp = "0.1.0"
 To enable specific features during installation, use as an example:
 ```toml
 [dependencies]
-dgsp = { version = "0.1.0", default-features = false, features = ["in-disk", "sphincs_sha2_256f"] }
+dgsp = { version = "0.1.0", default-features = false, features = ["in-disk", "sphincs_shake_256f"] }
 ```
 
 ---
@@ -197,49 +201,56 @@ Create a batch of certificate signing request:
 
 ```rust,ignore
 let batch_size = 8;
-let (wots_pks, mut wots_rands) = DGSP::cert_sign_req_user(&seed_u, batch_size);
+let (wots_pks, mut wots_rands) = DGSP::csr(&seed_u, batch_size);
 ```
 
 Manager generates the corresponding certificates:
 ```rust,ignore
-let mut certs = DGSP::req_cert(&skm.msk, id, cid, &wots_pks, &plm, &skm.spx_sk).unwrap();
+let mut certs = DGSP::gen_cert(&skm.msk, id, &cid, &wots_pks, &plm, &skm.spx_sk).unwrap();
+```
+
+User can check if given certificates are correct or not:
+```rust,ignore
+DGSP::check_cert(id, &cid, &wots_pks, &certs, &pkm).unwrap();
 ```
 
 User signs a message:
-
 ```rust,ignore
-let message = b"Hello, DGSP!";
-let signature = DGSP::sign(&message, wots_rands.pop.unwrap(), &seed_u, certs.pop.unwrap());
+let message = b"Hello, DGSP!".as_bytes();
+let signature = DGSP::sign(message, &seed_u, id, &cid, wots_rands.pop.unwrap(), certs.pop.unwrap());
 ```
 
 ### Verifying
 
 Verify the signature:
-
 ```rust,ignore
-DGSP::verify(&message, &signature, &revoked_list, &pkm).unwrap();
+DGSP::verify(message, &signature, &revoked_list, &pkm).unwrap();
 ```
 
 ### Opening
 
 Manager can open a signature to find out who has signed it:
-
 ```rust,ignore
-let (signer_id, signer_username) = DGSP::open(&skm.msk, &plm, &signature).unwrap();
+let (signer_id, signer_username, proof) = DGSP::open(&skm.msk, &plm, &signature, message).unwrap();
+```
+
+### Judging
+
+Judge manager to make sure the given signature and message are correctly opened to the user id:
+```rust,ignore
+DGSP::judge(&signature, message, id, &proof).unwrap();
 ```
 
 ### Revocation
 
 Revoke a user and their associated certificates:
-
 ```rust,ignore
-DGSP::revoke(&skm.msk, &plm, vec![id], &revoked_list).unwrap();
+DGSP::revoke(&skm.msk, &plm, &[id], &revoked_list).unwrap()
 ```
 
 To learn more, refer to the `examples/simple.rs` for additional information. One can run the `simple.rs` example for a specific sphincs feature via:
-
 ```bash
-cargo run --example simple --no-default-features --features "in-disk in-memory sphincs_shake_192f" --release
+cargo run --example simple --no-default-features --features "in-disk in-memory sphincs_shake_256f" --release
 ```
 
 ---
@@ -263,7 +274,7 @@ To test all combination of configurations in Unix-like operating systems, run th
 bash ./tests/all_features_full_test.sh
 ```
 
-Note that the full test may take some time to complete.
+Note that the full test will take some time to complete.
 
 ---
 
@@ -279,10 +290,9 @@ cargo bench --bench dgsp_full_in_memory
 Note that the above will run the benchmarks for the default features selected in Cargo.toml. To choose a specific SPHINCS+ feature, run: 
 
 ```sh
-cargo bench --bench dgsp_full_in_disk --no-default-features --features "in-disk benchmarking <SPHINCS+_FEATURE>"
-cargo bench --bench dgsp_full_in_memory --no-default-features --features "in-memory benchmarking <SPHINCS+_FEATURE>"
+cargo bench --bench dgsp_full_in_disk --no-default-features --features "in-disk benchmarking sphincs_shake_256s"
+cargo bench --bench dgsp_full_in_memory --no-default-features --features "in-memory benchmarking sphincs_shake_256s"
 ```
-where `<SPHINCS+_FEATURE>` represents the specific SPHINCS+ feature for which the benchmark will be executed, such as `sphincs_sha2_256s` or `sphincs_shake_128f`.
 
 ---
 
@@ -307,6 +317,8 @@ The library supports several feature flags for customization:
   - `sphincs_shake_256f`
   - `sphincs_shake_256s`
 - **`benchmarking`**: Used for benchmarking purposes.
+
+[//]: # (_default features:_ `in-disk`, `in-memory`, `serialization`, `sphincs_shake_256f`, `benchmarking` )
 
 ---
 

@@ -356,6 +356,7 @@ impl SphincsPlus {
 mod tests {
     use super::*;
     use rand::prelude::*;
+    use rand::rngs::OsRng;
 
     #[test]
     fn test_sphincs_plus() {
@@ -363,9 +364,10 @@ mod tests {
         assert!(kg.is_ok());
         let (pk, sk) = kg.unwrap();
 
-        let mut rng = thread_rng();
-        let len: u8 = rng.gen();
-        let message = (0..len).map(|_| rng.gen::<u8>()).collect::<Vec<_>>();
+        let mut rng = OsRng;
+        let length: usize = rng.gen_range(1..=10);
+        let mut message = vec![0u8; length];
+        rng.fill_bytes(&mut message);
 
         let signing = SphincsPlus::sign(&message, &sk);
         assert!(signing.is_ok());

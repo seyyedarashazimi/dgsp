@@ -1,6 +1,8 @@
 #!/bin/bash
 set -e
 
+export RUST_BACKTRACE=1
+
 sphincs_features=(
   "sphincs_sha2_128f"
   "sphincs_sha2_128s"

@@ -16,7 +16,7 @@ mod bench_utils;
 
 const MSK: [u8; DGSP_N] = [170_u8; DGSP_N];
 const GROUP_SIZE: u64 = 1 << 10;
-const CERTIFICATE_ISSUED_SIZE: usize = 1;
+const CERTIFICATE_ISSUED_SIZE: usize = 8;
 const TWEAK_USERS_SIZE: u64 = 10;
 
 fn path() -> PathBuf {
@@ -61,9 +61,9 @@ fn tweak_plm_rl(plm: &InDiskPLM, rl: &InDiskRevokedList, skm: &DGSPManagerSecret
     for u in GROUP_SIZE..(GROUP_SIZE + TWEAK_USERS_SIZE) {
         let (id, cid) = DGSP::join(&skm.msk, &u.to_string(), plm).unwrap();
         let seed_u = DGSP::keygen_user();
-        let (wots_pks, _) = DGSP::cert_sign_req_user(&seed_u, CERTIFICATE_ISSUED_SIZE);
-        DGSP::req_cert(&skm.msk, id, cid, &wots_pks, plm, &skm.spx_sk).unwrap();
-        DGSP::revoke(&skm.msk, plm, vec![id], rl).unwrap();
+        let (wots_pks, _) = DGSP::csr(&seed_u, CERTIFICATE_ISSUED_SIZE);
+        DGSP::gen_cert(&skm.msk, id, &cid, &wots_pks, plm, &skm.spx_sk).unwrap();
+        DGSP::revoke(&skm.msk, plm, &[id], rl).unwrap();
     }
 }
 
@@ -153,10 +153,7 @@ fn dgsp_full_benchmarks(c: &mut Criterion) {
 
                 let start = Instant::now();
                 for _ in 0..num_iters {
-                    black_box(DGSP::cert_sign_req_user(
-                        &seed_u,
-                        black_box(CERTIFICATE_ISSUED_SIZE),
-                    ));
+                    black_box(DGSP::csr(&seed_u, black_box(CERTIFICATE_ISSUED_SIZE)));
                 }
                 start.elapsed()
             });
@@ -170,20 +167,54 @@ fn dgsp_full_benchmarks(c: &mut Criterion) {
 
     let counter = AtomicU64::new(GROUP_SIZE + TWEAK_USERS_SIZE);
 
-    group.bench_function("cert", |b| {
+    group.bench_function("gen_cert", |b| {
         pool.install(|| {
             b.iter_custom(|num_iters| {
                 let username = counter.fetch_add(1, Ordering::Relaxed).to_string();
                 let (id, cid) = DGSP::join(&skm.msk, &username, &plm).unwrap();
                 let seed_u = DGSP::keygen_user();
-                let (wots_pks, _) = DGSP::cert_sign_req_user(&seed_u, CERTIFICATE_ISSUED_SIZE);
+                let (wots_pks, _) = DGSP::csr(&seed_u, CERTIFICATE_ISSUED_SIZE);
 
                 let start = Instant::now();
                 for _ in 0..num_iters {
                     black_box(
-                        DGSP::req_cert(&skm.msk, id, cid, black_box(&wots_pks), &plm, &skm.spx_sk)
+                        DGSP::gen_cert(&skm.msk, id, &cid, black_box(&wots_pks), &plm, &skm.spx_sk)
                             .unwrap(),
                     );
+                }
+                start.elapsed()
+            });
+        });
+    });
+
+    println!("Resetting database...");
+    reset_plm(&plm);
+    clear_revoked_list(&revoked_list);
+    tweak_plm_rl(&plm, &revoked_list, &skm);
+    let counter = AtomicU64::new(GROUP_SIZE + TWEAK_USERS_SIZE);
+
+    group.bench_function("check_cert", |b| {
+        pool.install(|| {
+            b.iter_custom(|num_iters| {
+                let username = counter.fetch_add(1, Ordering::Relaxed).to_string();
+                let (id, cid) = DGSP::join(&skm.msk, &username, &plm).unwrap();
+                let seed_u = DGSP::keygen_user();
+                let mut message = [0u8; 1];
+                let (wots_pks, _) = DGSP::csr(&seed_u, 1);
+                let certs =
+                    DGSP::gen_cert(&skm.msk, id, &cid, &wots_pks, &plm, &skm.spx_sk).unwrap();
+                OsRng.fill_bytes(&mut message);
+
+                let start = Instant::now();
+                for _ in 0..num_iters {
+                    let result = black_box(DGSP::check_cert(
+                        id,
+                        &cid,
+                        &wots_pks,
+                        black_box(&certs),
+                        &pkm,
+                    ));
+                    result.expect("Check certificates failed");
                 }
                 start.elapsed()
             });
@@ -203,9 +234,9 @@ fn dgsp_full_benchmarks(c: &mut Criterion) {
                 let (id, cid) = DGSP::join(&skm.msk, &username, &plm).unwrap();
                 let seed_u = DGSP::keygen_user();
                 let mut message = [0u8; 1];
-                let (wots_pks, mut wots_rands) = DGSP::cert_sign_req_user(&seed_u, 1);
+                let (wots_pks, mut wots_rands) = DGSP::csr(&seed_u, 1);
                 let mut certs =
-                    DGSP::req_cert(&skm.msk, id, cid, &wots_pks, &plm, &skm.spx_sk).unwrap();
+                    DGSP::gen_cert(&skm.msk, id, &cid, &wots_pks, &plm, &skm.spx_sk).unwrap();
                 let wots_rand = wots_rands.pop().unwrap();
                 let cert = certs.pop().unwrap();
                 OsRng.fill_bytes(&mut message);
@@ -214,8 +245,10 @@ fn dgsp_full_benchmarks(c: &mut Criterion) {
                 for _ in 0..num_iters {
                     black_box(DGSP::sign(
                         black_box(&message),
-                        wots_rand.clone(),
                         &seed_u,
+                        id,
+                        &cid,
+                        wots_rand.clone(),
                         cert.clone(),
                     ));
                 }
@@ -237,13 +270,13 @@ fn dgsp_full_benchmarks(c: &mut Criterion) {
                 let (id, cid) = DGSP::join(&skm.msk, &username, &plm).unwrap();
                 let seed_u = DGSP::keygen_user();
                 let mut message = [0u8; 1];
-                let (wots_pks, mut wots_rands) = DGSP::cert_sign_req_user(&seed_u, 1);
+                let (wots_pks, mut wots_rands) = DGSP::csr(&seed_u, 1);
                 let mut certs =
-                    DGSP::req_cert(&skm.msk, id, cid, &wots_pks, &plm, &skm.spx_sk).unwrap();
+                    DGSP::gen_cert(&skm.msk, id, &cid, &wots_pks, &plm, &skm.spx_sk).unwrap();
                 let wots_rand = wots_rands.pop().unwrap();
                 let cert = certs.pop().unwrap();
                 OsRng.fill_bytes(&mut message);
-                let sig = DGSP::sign(&message, wots_rand, &seed_u, cert);
+                let sig = DGSP::sign(&message, &seed_u, id, &cid, wots_rand, cert);
 
                 let start = Instant::now();
                 for _ in 0..num_iters {
@@ -269,17 +302,51 @@ fn dgsp_full_benchmarks(c: &mut Criterion) {
                 let (id, cid) = DGSP::join(&skm.msk, &username, &plm).unwrap();
                 let seed_u = DGSP::keygen_user();
                 let mut message = [0u8; 1];
-                let (wots_pks, mut wots_rands) = DGSP::cert_sign_req_user(&seed_u, 1);
+                let (wots_pks, mut wots_rands) = DGSP::csr(&seed_u, 1);
                 let mut certs =
-                    DGSP::req_cert(&skm.msk, id, cid, &wots_pks, &plm, &skm.spx_sk).unwrap();
+                    DGSP::gen_cert(&skm.msk, id, &cid, &wots_pks, &plm, &skm.spx_sk).unwrap();
                 let wots_rand = wots_rands.pop().unwrap();
                 let cert = certs.pop().unwrap();
                 OsRng.fill_bytes(&mut message);
-                let sig = DGSP::sign(&message, wots_rand, &seed_u, cert);
+                let sig = DGSP::sign(&message, &seed_u, id, &cid, wots_rand, cert);
 
                 let start = Instant::now();
                 for _ in 0..num_iters {
-                    black_box(DGSP::open(&skm.msk, &plm, black_box(&sig)).unwrap());
+                    black_box(DGSP::open(&skm.msk, &plm, &sig, black_box(&message)).unwrap());
+                }
+                start.elapsed()
+            });
+        });
+    });
+
+    println!("Resetting database...");
+    reset_plm(&plm);
+    clear_revoked_list(&revoked_list);
+    tweak_plm_rl(&plm, &revoked_list, &skm);
+    let counter = AtomicU64::new(GROUP_SIZE + TWEAK_USERS_SIZE);
+
+    group.bench_function("judge", |b| {
+        pool.install(|| {
+            b.iter_custom(|num_iters| {
+                let username = counter.fetch_add(1, Ordering::Relaxed).to_string();
+                let (id, cid) = DGSP::join(&skm.msk, &username, &plm).unwrap();
+                let seed_u = DGSP::keygen_user();
+                let mut message = [0u8; 1];
+                let (wots_pks, mut wots_rands) = DGSP::csr(&seed_u, 1);
+                let mut certs =
+                    DGSP::gen_cert(&skm.msk, id, &cid, &wots_pks, &plm, &skm.spx_sk).unwrap();
+                let wots_rand = wots_rands.pop().unwrap();
+                let cert = certs.pop().unwrap();
+                OsRng.fill_bytes(&mut message);
+                let sig = DGSP::sign(&message, &seed_u, id, &cid, wots_rand, cert);
+                let (id_opened, _, proof) =
+                    DGSP::open(&skm.msk, &plm, &sig, black_box(&message)).unwrap();
+
+                let start = Instant::now();
+                for _ in 0..num_iters {
+                    let result =
+                        black_box(DGSP::judge(&sig, black_box(&message), id_opened, &proof));
+                    result.expect("Judge failed");
                 }
                 start.elapsed()
             });
@@ -302,16 +369,16 @@ fn dgsp_full_benchmarks(c: &mut Criterion) {
                     let username = counter.fetch_add(1, Ordering::Relaxed).to_string();
                     let (id, cid) = DGSP::join(&skm.msk, &username, &plm).unwrap();
                     let seed_u = DGSP::keygen_user();
-                    let (wots_pks, _) = DGSP::cert_sign_req_user(&seed_u, CERTIFICATE_ISSUED_SIZE);
+                    let (wots_pks, _) = DGSP::csr(&seed_u, CERTIFICATE_ISSUED_SIZE);
                     black_box(
-                        DGSP::req_cert(&skm.msk, id, cid, &wots_pks, &plm, &skm.spx_sk).unwrap(),
+                        DGSP::gen_cert(&skm.msk, id, &cid, &wots_pks, &plm, &skm.spx_sk).unwrap(),
                     );
 
                     // Start timer
                     let start = Instant::now();
 
                     // Benchmark
-                    let result = black_box(DGSP::revoke(&skm.msk, &plm, vec![id], &revoked_list));
+                    let result = black_box(DGSP::revoke(&skm.msk, &plm, &[id], &revoked_list));
 
                     // Stop timer
                     total += start.elapsed();
@@ -328,6 +395,7 @@ fn dgsp_full_benchmarks(c: &mut Criterion) {
     reset_plm(&plm);
 
     group.finish();
+    println!("Benchmarking in-disk for Group-size:{GROUP_SIZE} and Batch-size:{CERTIFICATE_ISSUED_SIZE} finished successfully.");
 }
 
 criterion_group!(benches, dgsp_full_benchmarks);

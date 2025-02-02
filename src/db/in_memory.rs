@@ -1,5 +1,5 @@
 use crate::db::{PLMInterface, RevokedListInterface};
-use crate::params::DGSP_POS_BYTES;
+use crate::params::DGSP_NU_BYTES;
 use crate::Result;
 use std::collections::HashSet;
 use std::fmt::Display;
@@ -154,7 +154,7 @@ impl InMemoryPLM {
 /// RevokedList is a public list containing the DGSP.pos values to show which signatures and issued
 /// certificates are revoked.
 #[derive(Default)]
-pub struct InMemoryRevokedList(Arc<Mutex<HashSet<[u8; DGSP_POS_BYTES]>>>);
+pub struct InMemoryRevokedList(Arc<Mutex<HashSet<[u8; DGSP_NU_BYTES]>>>);
 
 impl RevokedListInterface for InMemoryRevokedList {
     fn open<P: AsRef<Path> + Send>(_: P) -> Result<Self> {
@@ -168,7 +168,7 @@ impl RevokedListInterface for InMemoryRevokedList {
     }
 
     /// Insert a given pos into the RevokedList
-    fn insert(&self, pos: [u8; DGSP_POS_BYTES]) -> Result<()> {
+    fn insert(&self, pos: [u8; DGSP_NU_BYTES]) -> Result<()> {
         let mut data = self.0.lock()?;
         data.insert(pos);
         Ok(())
@@ -178,7 +178,7 @@ impl RevokedListInterface for InMemoryRevokedList {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::params::DGSP_POS_BYTES;
+    use crate::params::DGSP_NU_BYTES;
     use crate::Error;
     use rand::distributions::Alphanumeric;
     use rand::rngs::OsRng;
@@ -247,7 +247,7 @@ mod tests {
     fn test_revoked_list() {
         let temp_dir = TempDir::new().expect("Failed to create temp dir");
         let rl = InMemoryRevokedList::open(temp_dir.path().join(TEST_DB_PATH)).unwrap();
-        let mut pos = [0u8; DGSP_POS_BYTES];
+        let mut pos = [0u8; DGSP_NU_BYTES];
         OsRng.fill_bytes(&mut pos);
         assert!(!rl.contains(&pos).unwrap());
         rl.insert(pos).unwrap();

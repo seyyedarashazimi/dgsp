@@ -18,6 +18,10 @@ pub type Result<T> = core::result::Result<T, Error>;
 /// * `IdNotFound` - Indicates that a specific user ID was not found. Contains the missing user ID.
 /// * `UsernameAlreadyExists` - Indicates that a given username already exists. Contains the conflicting username.
 /// * `InvalidCertReq` - Indicates an invalid request for certificate generation.
+/// * `WrongIDOpened` - Indicates the given id for the opened signature is wrong.
+/// * `SizeMismatch` - Shows a mismatch in the number of the given elements.
+/// * `RandGenerationFailed` - Indicates a failure to generate a random value.
+/// * `Custom` - Any custom error, holding a `String` for more info.
 #[derive(Error, Debug, PartialEq, Eq)]
 pub enum Error {
     /// Indicates an invalid data length, specifying the expected and actual lengths.
@@ -32,7 +36,7 @@ pub enum Error {
     #[error("Failed to convert from byte slice due to the bad length: {0}")]
     FromBytesBadLength(String),
     /// Indicates that a signature verification operation failed. Wraps a [`VerificationError`].
-    #[error("Signature verification failed: {0}")]
+    #[error("Verification failed: {0}")]
     VerificationFailed(#[from] VerificationError),
     /// Represents an internal error in the database, with a descriptive error message.
     /// This can also be treated as user-provided error type that indicates any error caused by
@@ -48,6 +52,18 @@ pub enum Error {
     /// Indicates that a certificate generation request was invalid, mostly caused by revocation.
     #[error("Invalid request for certificate generation")]
     InvalidCertReq,
+    /// Indicates that the manager opened the id for a signature incorrectly.
+    #[error("The given id {0} is incorrectly attributed to the opened signature")]
+    WrongIDOpened(u64),
+    /// Shows a mismatch in the number of the given elements.
+    #[error("Length mismatch in given inputs, as 2 or more inputs must have equal element sizes")]
+    SizeMismatch,
+    /// Indicates an error happening when trying to generate a random value.
+    #[error("failed to generate random value: {0}")]
+    RandGenerationFailed(String),
+    /// Custom error.
+    #[error("Custom error: {0}")]
+    Custom(String),
 }
 
 impl From<std::array::TryFromSliceError> for Error {

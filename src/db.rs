@@ -1,4 +1,4 @@
-use crate::params::DGSP_POS_BYTES;
+use crate::params::DGSP_NU_BYTES;
 use crate::Result;
 use std::fmt::Display;
 use std::path::Path;
@@ -60,5 +60,5 @@ pub trait RevokedListInterface {
     fn contains(&self, pos: &[u8]) -> Result<bool>;
 
     /// Insert a given pos into the RevokedList
-    fn insert(&self, pos: [u8; DGSP_POS_BYTES]) -> Result<()>;
+    fn insert(&self, pos: [u8; DGSP_NU_BYTES]) -> Result<()>;
 }

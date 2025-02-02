@@ -16,7 +16,7 @@ sphincs_features=(
   "sphincs_shake_256s"
 )
 storage_types=("memory" "disk")
-GROUP_SIZES_LOG=(10 20 30)
+GROUP_SIZES_LOG=(10 25)
 CERTIFICATE_ISSUED_SIZES=(1 8)
 
 update_constants() {

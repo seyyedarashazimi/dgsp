@@ -1,3 +1,4 @@
+mod cipher;
 mod db;
 mod error;
 mod hash;
@@ -8,6 +9,7 @@ pub mod params;
 pub mod sphincs_plus;
 pub mod wots_plus;
 
+// prelude:
 pub use crate::db::{PLMInterface, RevokedListInterface};
 pub use crate::error::{Error, Result, VerificationError};
 
