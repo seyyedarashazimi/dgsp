@@ -2,16 +2,6 @@
 set -e
 
 sphincs_features=(
-  "sphincs_sha2_128f"
-  "sphincs_sha2_128s"
-  "sphincs_sha2_192f"
-  "sphincs_sha2_192s"
-  "sphincs_sha2_256f"
-  "sphincs_sha2_256s"
-  "sphincs_shake_128f"
-  "sphincs_shake_128s"
-  "sphincs_shake_192f"
-  "sphincs_shake_192s"
   "sphincs_shake_256f"
   "sphincs_shake_256s"
 )

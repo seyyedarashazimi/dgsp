@@ -15,8 +15,8 @@ use std::time::{Duration, Instant};
 mod bench_utils;
 
 const MSK: [u8; DGSP_N] = [170_u8; DGSP_N];
-const GROUP_SIZE: u64 = 1 << 10;
-const CERTIFICATE_ISSUED_SIZE: usize = 8;
+const GROUP_SIZE: u64 = 1 << 25;
+const CERTIFICATE_ISSUED_SIZE: usize = 1;
 const TWEAK_USERS_SIZE: u64 = 10;
 
 fn path() -> PathBuf {
@@ -27,20 +27,43 @@ fn path() -> PathBuf {
     ))
 }
 
+// fn initialize_plm_with_users() -> InDiskPLM {
+//     let path = path();
+//     let db_preloaded = path.join("plm").exists();
+//
+//     let plm = InDiskPLM::open(path).unwrap();
+//
+//     if !db_preloaded {
+//         (0..GROUP_SIZE).for_each(|u| {
+//             DGSP::join(&DGSPMSK::from(MSK), &u.to_string(), &plm).unwrap();
+//         });
+//     }
+//     plm.flush_plm().unwrap();
+//
+//     plm
+// }
+
 fn initialize_plm_with_users() -> InDiskPLM {
     let path = path();
     let db_preloaded = path.join("plm").exists();
-
     let plm = InDiskPLM::open(path).unwrap();
 
     if !db_preloaded {
-        // populate group with initial users in parallel
-        (0..GROUP_SIZE).for_each(|u| {
-            DGSP::join(&DGSPMSK::from(MSK), &u.to_string(), &plm).unwrap();
-        });
+        // Instead of inserting all users at once, do it in batches.
+        let chunk_size = 10_000;
+        let mut start = 0;
+        while start < GROUP_SIZE {
+            let end = std::cmp::min(start + chunk_size, GROUP_SIZE);
+            for u in start..end {
+                DGSP::join(&DGSPMSK::from(MSK), &u.to_string(), &plm)
+                    .expect("Join should not fail");
+            }
+            // Flush the database after each chunk.
+            plm.flush_plm().unwrap();
+            start = end;
+        }
     }
     plm.flush_plm().unwrap();
-
     plm
 }
 
@@ -86,7 +109,7 @@ fn dgsp_full_benchmarks(c: &mut Criterion) {
         "DGSP_in_disk_using_{}_with_{GROUP_SIZE}_users_and_{CERTIFICATE_ISSUED_SIZE}_batch",
         detect_spx_feature()
     ));
-    group.sample_size(10);
+    group.sample_size(100);
 
     group.bench_function("keygen_manager", |b| {
         pool.install(|| {
@@ -200,7 +223,7 @@ fn dgsp_full_benchmarks(c: &mut Criterion) {
                 let (id, cid) = DGSP::join(&skm.msk, &username, &plm).unwrap();
                 let seed_u = DGSP::keygen_user();
                 let mut message = [0u8; 1];
-                let (wots_pks, _) = DGSP::csr(&seed_u, 1);
+                let (wots_pks, _) = DGSP::csr(&seed_u, CERTIFICATE_ISSUED_SIZE);
                 let certs =
                     DGSP::gen_cert(&skm.msk, id, &cid, &wots_pks, &plm, &skm.spx_sk).unwrap();
                 OsRng.fill_bytes(&mut message);

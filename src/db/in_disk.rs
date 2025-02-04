@@ -249,9 +249,24 @@ impl InDiskPLM {
                     ));
                 }
 
-                for u in (start_id..last_id).rev() {
-                    ptree.remove(&u.to_be_bytes())?;
-                    ntree.remove(u.to_string().as_bytes())?;
+                // for u in (start_id..last_id).rev() {
+                //     ptree.remove(&u.to_be_bytes())?;
+                //     ntree.remove(u.to_string().as_bytes())?;
+                // }
+                let chunk_size = 10_000;
+                let mut current = last_id;
+                while current > start_id {
+                    let chunk_start = if current >= chunk_size {
+                        current - chunk_size
+                    } else {
+                        start_id
+                    };
+                    // Remove the keys in this batch (in reverse order)
+                    for u in (chunk_start..current).rev() {
+                        ptree.remove(&u64_to_bytes(u))?;
+                        ntree.remove(u.to_string().as_bytes())?;
+                    }
+                    current = chunk_start;
                 }
 
                 mtree.insert(NEXT_ID_KEY, &u64_to_bytes(start_id))?;
