@@ -124,6 +124,75 @@ The library itself provides in-memory and in-disk implementations for the above 
 
 ---
 
+## Benchmarks
+
+### DGSP Timing Benchmarks
+We ran our tests on a computer with Ubuntu 24.04 using Rust 1.84.0 (stable) in release mode. The tests were done on an
+Intel® Core™ i7-4702MQ CPU at 2.20 GHz with 16 GiB of memory. To keep the results steady, we used just one processor 
+core and turned off hyper-threading and turbo-boost. The results are the average of 100 test runs. Note that in reality,
+the most time-consuming operations like Gen Cert will be run in parallel as the code supports multi-threading.
+
+All benchmark times are in milliseconds (ms).
+#### DGSP Timing Benchmarks for `sphincs_shake_256f` feature
+
+```markdown
+| DB feature     |             in-memory             |              in-disk              |
+| GROUP SIZE     |       2^10      |       2^25      |       2^10      |       2^25      |
+| BATCH SIZE     |   1    |   8    |   1    |   8    |   1    |   8    |   1    |   8    |
+|----------------|--------|--------|--------|--------|--------|--------|--------|--------|
+| Manager KeyGen | 3.0538 | 3.0526 | 3.0530 | 3.0517 | 3.0578 | 3.0524 | 3.0552 | 3.0551 |
+| Join           | 0.0019 | 0.0019 | 0.0017 | 0.0017 | 0.0241 | 0.0240 | 0.0276 | 0.0297 |
+| CSR            | 1.3623 | 11.013 | 1.3613 | 11.019 | 1.3743 | 11.082 | 1.3655 | 11.001 |
+| Gen Cert       | 61.507 | 491.51 | 61.472 | 493.58 | 62.093 | 491.57 | 61.568 | 492.53 |
+| Check Cert     | 2.0900 | 16.734 | 2.0920 | 16.722 | 2.0913 | 16.727 | 2.0918 | 16.703 |
+| Sign           | 1.4114 | 1.4129 | 1.4119 | 1.4127 | 1.4043 | 1.4014 | 1.3900 | 1.3906 |
+| Verify         | 2.7698 | 2.7768 | 2.7697 | 2.7681 | 2.7593 | 2.7695 | 2.7662 | 2.7611 |
+| Open           | 0.6865 | 0.6857 | 0.6941 | 0.6906 | 0.6923 | 0.6831 | 0.6816 | 0.6696 |
+| Judge          | 0.6848 | 0.6934 | 0.6923 | 0.6901 | 0.6722 | 0.6859 | 0.6782 | 0.6741 |
+| Revoke         | 0.0006 | 0.0023 | 0.0007 | 0.0022 | 0.0251 | 0.0572 | 0.0278 | 0.0678 |
+```
+
+#### DGSP Timing Benchmarks for `sphincs_shake_256s` feature
+
+```markdown
+| DB feature     |             in-memory             |              in-disk              |
+| GROUP SIZE     |       2^10      |       2^25      |       2^10      |       2^25      |
+| BATCH SIZE     |   1    |   8    |   1    |   8    |   1    |   8    |   1    |   8    |
+|----------------|--------|--------|--------|--------|--------|--------|--------|--------|
+| Manager KeyGen | 48.880 | 48.778 | 48.786 | 48.837 | 48.803 | 48.816 | 48.916 | 48.830 |
+| Join           | 0.0019 | 0.0019 | 0.0017 | 0.0017 | 0.0246 | 0.0243 | 0.0270 | 0.0263 |
+| CSR            | 1.3498 | 10.926 | 1.3493 | 10.916 | 1.3476 | 10.900 | 1.3590 | 10.990 |
+| Gen Cert       | 581.79 | 4656.2 | 581.89 | 4655.2 | 581.91 | 4666.7 | 583.47 | 4661.4 |
+| Check Cert     | 1.1426 | 9.1171 | 1.1405 | 9.1137 | 1.1419 | 9.1060 | 1.1517 | 9.1636 |
+| Sign           | 1.3932 | 1.3932 | 1.3933 | 1.3922 | 1.3727 | 1.3719 | 1.4277 | 1.4283 |
+| Verify         | 1.8276 | 1.8168 | 1.8152 | 1.8259 | 1.8003 | 1.7993 | 1.8305 | 1.8206 |
+| Open           | 0.6984 | 0.6962 | 0.7045 | 0.6972 | 0.6738 | 0.6648 | 0.6832 | 0.6793 |
+| Judge          | 0.6777 | 0.6801 | 0.6840 | 0.6785 | 0.6659 | 0.6567 | 0.6745 | 0.6720 |
+| Revoke         | 0.0009 | 0.0029 | 0.0008 | 0.0028 | 0.0399 | 0.0674 | 0.0311 | 0.0745 |
+```
+
+### DGSP Size of Manager Keys and Signature
+All sizes are in Bytes.
+
+```markdown
+| SPHINCS+ feature   | Public Key | Secret Key | Signature |
+|--------------------|------------|------------|-----------|
+| sphincs_sha2_128f  |     32     |     80     |   17704   |
+| sphincs_sha2_128s  |     32     |     80     |    8472   |
+| sphincs_sha2_192f  |     48     |    120     |   36960   |
+| sphincs_sha2_192s  |     48     |    120     |   17520   |
+| sphincs_sha2_256f  |     64     |    160     |   52088   |
+| sphincs_sha2_256s  |     64     |    160     |   32024   |
+| sphincs_shake_128f |     32     |     80     |   17704   |
+| sphincs_shake_128s |     32     |     80     |    8472   |
+| sphincs_shake_192f |     48     |    120     |   36960   |
+| sphincs_shake_192s |     48     |    120     |   17520   |
+| sphincs_shake_256f |     64     |    160     |   52088   |
+| sphincs_shake_256s |     64     |    160     |   32024   |
+```
+
+---
+
 ## Installation
 
 ### Prerequisites
