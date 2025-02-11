@@ -1,4 +1,4 @@
-use crate::params::{DGSP_N, DGSP_USER_BYTES};
+use crate::params::DGSP_N;
 use crate::sphincs_plus::SPX_SHA256_BLOCK_BYTES;
 use crate::wots_plus::adrs::Adrs;
 use sha2::{Digest, Sha256};
@@ -17,13 +17,6 @@ impl DGSPHasher {
         sha256.update(block256);
 
         Self { sha256 }
-    }
-
-    pub(crate) fn calc_cid(output: &mut [u8], msk: &[u8], id_bytes: &[u8]) {
-        let mut hasher = Sha256::default();
-        hasher.update(msk[..DGSP_N].as_ref());
-        hasher.update(id_bytes[..DGSP_USER_BYTES].as_ref());
-        output[..DGSP_N].copy_from_slice(&hasher.finalize()[..DGSP_N]);
     }
 
     pub(crate) fn hash_simple(output: &mut [u8], input: &[u8]) {

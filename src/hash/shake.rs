@@ -1,4 +1,4 @@
-use crate::params::{DGSP_N, DGSP_USER_BYTES};
+use crate::params::DGSP_N;
 use crate::wots_plus::adrs::Adrs;
 use sha3::{
     digest::{ExtendableOutput, Update, XofReader},
@@ -15,14 +15,6 @@ impl DGSPHasher {
         Self {
             pub_seed: pub_seed.as_ref().try_into().unwrap(),
         }
-    }
-
-    pub(crate) fn calc_cid(output: &mut [u8], msk: &[u8], id_bytes: &[u8]) {
-        let mut hasher = Shake256::default();
-        hasher.update(msk.as_ref());
-        hasher.update(id_bytes[..DGSP_USER_BYTES].as_ref());
-        let mut reader = hasher.finalize_xof();
-        reader.read(output[..DGSP_N].as_mut());
     }
 
     pub(crate) fn hash_simple(output: &mut [u8], input: &[u8]) {

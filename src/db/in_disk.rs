@@ -1,5 +1,5 @@
 use crate::db::{PLMInterface, RevokedListInterface};
-use crate::params::DGSP_NU_BYTES;
+use crate::params::DGSP_ZETA_BYTES;
 use crate::utils::{bytes_to_u64, u64_to_bytes};
 use crate::Result;
 use serde::{Deserialize, Serialize};
@@ -304,7 +304,7 @@ impl RevokedListInterface for InDiskRevokedList {
     }
 
     /// Insert a given pos into the RevokedList
-    fn insert(&self, pos: [u8; DGSP_NU_BYTES]) -> Result<()> {
+    fn insert(&self, pos: [u8; DGSP_ZETA_BYTES]) -> Result<()> {
         self.db.insert(pos, &[])?;
         Ok(())
     }
@@ -326,7 +326,7 @@ impl InDiskRevokedList {
 mod tests {
     use super::*;
     use crate::db::in_disk::InDiskPLM;
-    use crate::params::DGSP_NU_BYTES;
+    use crate::params::DGSP_ZETA_BYTES;
     use crate::Error;
     use rand::distributions::Alphanumeric;
     use rand::rngs::OsRng;
@@ -395,7 +395,7 @@ mod tests {
     fn test_revoked_list() {
         let temp_dir = TempDir::new().expect("Failed to create temp dir");
         let rl = InDiskRevokedList::open(temp_dir.path().join(TEST_DB_PATH)).unwrap();
-        let mut pos = [0u8; DGSP_NU_BYTES];
+        let mut pos = [0u8; DGSP_ZETA_BYTES];
         OsRng.fill_bytes(&mut pos);
         assert!(!rl.contains(&pos).unwrap());
         rl.insert(pos).unwrap();

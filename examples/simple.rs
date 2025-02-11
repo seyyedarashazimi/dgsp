@@ -44,7 +44,7 @@ fn simple_dgsp_in_memory() {
     let (wots_pks, mut wots_rands) = DGSP::csr(&seed_u, 2);
 
     // The user then requests a batch of certificates for the 2 WOTS+ public keys created.
-    let mut certs = DGSP::gen_cert(&skm.msk, id, &cid, &wots_pks, &plm, &skm.spx_sk).unwrap();
+    let mut certs = DGSP::gen_cert(&skm.msk, &skm.spx_sk, id, &cid, &wots_pks, &plm).unwrap();
     println!(
         "Created {} new certificates for {:?}, requested by the user.",
         certs.len(),
@@ -90,7 +90,7 @@ fn simple_dgsp_in_memory() {
 
     // User then asks for a few more certificates from the DGSP manager.
     let (wots_pks, mut wots_rands) = DGSP::csr(&seed_u, 5);
-    let mut certs = DGSP::gen_cert(&skm.msk, id, &cid, &wots_pks, &plm, &skm.spx_sk).unwrap();
+    let mut certs = DGSP::gen_cert(&skm.msk, &skm.spx_sk, id, &cid, &wots_pks, &plm).unwrap();
     println!(
         "Created {} new certificates for {:?}, requested by the user.",
         certs.len(),
@@ -202,7 +202,7 @@ fn simple_dgsp_in_disk() {
     let (wots_pks, mut wots_rands) = DGSP::csr(&seed_u, 2);
 
     // The user then requests a batch of certificates for the 2 WOTS+ public keys created.
-    let mut certs = DGSP::gen_cert(&skm.msk, id, &cid, &wots_pks, &plm, &skm.spx_sk).unwrap();
+    let mut certs = DGSP::gen_cert(&skm.msk, &skm.spx_sk, id, &cid, &wots_pks, &plm).unwrap();
     println!(
         "Created {} new certificates for {:?}, requested by the user.",
         certs.len(),
@@ -248,7 +248,7 @@ fn simple_dgsp_in_disk() {
 
     // User then asks for a few more certificates from the DGSP manager.
     let (wots_pks, mut wots_rands) = DGSP::csr(&seed_u, 5);
-    let mut certs = DGSP::gen_cert(&skm.msk, id, &cid, &wots_pks, &plm, &skm.spx_sk).unwrap();
+    let mut certs = DGSP::gen_cert(&skm.msk, &skm.spx_sk, id, &cid, &wots_pks, &plm).unwrap();
     println!(
         "Created {} new certificates for {:?}, requested by the user.",
         certs.len(),

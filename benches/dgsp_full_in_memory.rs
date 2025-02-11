@@ -43,7 +43,7 @@ fn tweak_plm_rl(plm: &InMemoryPLM, rl: &InMemoryRevokedList, skm: &DGSPManagerSe
         let (id, cid) = DGSP::join(&skm.msk, &u.to_string(), plm).unwrap();
         let seed_u = DGSP::keygen_user();
         let (wots_pks, _) = DGSP::csr(&seed_u, CERTIFICATE_ISSUED_SIZE);
-        DGSP::gen_cert(&skm.msk, id, &cid, &wots_pks, plm, &skm.spx_sk).unwrap();
+        DGSP::gen_cert(&skm.msk, &skm.spx_sk, id, &cid, &wots_pks, plm).unwrap();
 
         DGSP::revoke(&skm.msk, plm, &[id], rl).unwrap();
     }
@@ -157,7 +157,7 @@ fn dgsp_full_benchmarks(c: &mut Criterion) {
                 let start = Instant::now();
                 for _ in 0..num_iters {
                     black_box(
-                        DGSP::gen_cert(&skm.msk, id, &cid, black_box(&wots_pks), &plm, &skm.spx_sk)
+                        DGSP::gen_cert(&skm.msk, &skm.spx_sk, id, &cid, black_box(&wots_pks), &plm)
                             .unwrap(),
                     );
                 }
@@ -182,7 +182,7 @@ fn dgsp_full_benchmarks(c: &mut Criterion) {
                 let mut message = [0u8; 1];
                 let (wots_pks, _) = DGSP::csr(&seed_u, CERTIFICATE_ISSUED_SIZE);
                 let certs =
-                    DGSP::gen_cert(&skm.msk, id, &cid, &wots_pks, &plm, &skm.spx_sk).unwrap();
+                    DGSP::gen_cert(&skm.msk, &skm.spx_sk, id, &cid, &wots_pks, &plm).unwrap();
                 OsRng.fill_bytes(&mut message);
 
                 let start = Instant::now();
@@ -217,7 +217,7 @@ fn dgsp_full_benchmarks(c: &mut Criterion) {
                 let mut message = [0u8; 1];
                 let (wots_pks, mut wots_rands) = DGSP::csr(&seed_u, 1);
                 let mut certs =
-                    DGSP::gen_cert(&skm.msk, id, &cid, &wots_pks, &plm, &skm.spx_sk).unwrap();
+                    DGSP::gen_cert(&skm.msk, &skm.spx_sk, id, &cid, &wots_pks, &plm).unwrap();
                 let wots_rand = wots_rands.pop().unwrap();
                 let cert = certs.pop().unwrap();
                 OsRng.fill_bytes(&mut message);
@@ -254,7 +254,7 @@ fn dgsp_full_benchmarks(c: &mut Criterion) {
                 let mut message = [0u8; 1];
                 let (wots_pks, mut wots_rands) = DGSP::csr(&seed_u, 1);
                 let mut certs =
-                    DGSP::gen_cert(&skm.msk, id, &cid, &wots_pks, &plm, &skm.spx_sk).unwrap();
+                    DGSP::gen_cert(&skm.msk, &skm.spx_sk, id, &cid, &wots_pks, &plm).unwrap();
                 let wots_rand = wots_rands.pop().unwrap();
                 let cert = certs.pop().unwrap();
                 OsRng.fill_bytes(&mut message);
@@ -287,7 +287,7 @@ fn dgsp_full_benchmarks(c: &mut Criterion) {
                 let mut message = [0u8; 1];
                 let (wots_pks, mut wots_rands) = DGSP::csr(&seed_u, 1);
                 let mut certs =
-                    DGSP::gen_cert(&skm.msk, id, &cid, &wots_pks, &plm, &skm.spx_sk).unwrap();
+                    DGSP::gen_cert(&skm.msk, &skm.spx_sk, id, &cid, &wots_pks, &plm).unwrap();
                 let wots_rand = wots_rands.pop().unwrap();
                 let cert = certs.pop().unwrap();
                 OsRng.fill_bytes(&mut message);
@@ -318,7 +318,7 @@ fn dgsp_full_benchmarks(c: &mut Criterion) {
                 let mut message = [0u8; 1];
                 let (wots_pks, mut wots_rands) = DGSP::csr(&seed_u, 1);
                 let mut certs =
-                    DGSP::gen_cert(&skm.msk, id, &cid, &wots_pks, &plm, &skm.spx_sk).unwrap();
+                    DGSP::gen_cert(&skm.msk, &skm.spx_sk, id, &cid, &wots_pks, &plm).unwrap();
                 let wots_rand = wots_rands.pop().unwrap();
                 let cert = certs.pop().unwrap();
                 OsRng.fill_bytes(&mut message);
@@ -356,7 +356,7 @@ fn dgsp_full_benchmarks(c: &mut Criterion) {
                     let seed_u = DGSP::keygen_user();
                     let (wots_pks, _) = DGSP::csr(&seed_u, CERTIFICATE_ISSUED_SIZE);
                     black_box(
-                        DGSP::gen_cert(&skm.msk, id, &cid, &wots_pks, &plm, &skm.spx_sk).unwrap(),
+                        DGSP::gen_cert(&skm.msk, &skm.spx_sk, id, &cid, &wots_pks, &plm).unwrap(),
                     );
 
                     // Start timer

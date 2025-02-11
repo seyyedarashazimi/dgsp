@@ -3,9 +3,9 @@ use thiserror::Error;
 /// Convenience wrapper for Result
 pub type Result<T> = core::result::Result<T, Error>;
 
-/// Represents the possible errors in the application.
+/// Represents the DGSP errors.
 ///
-/// This enum defines a variety of errors that can occur during the execution of
+/// This enum defines a variety of errors that can occur during the execution of DGSP
 /// operations, such as validation errors, database errors, and signature verification issues.
 ///
 /// # Variants

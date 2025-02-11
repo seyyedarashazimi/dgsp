@@ -12,15 +12,15 @@ pub const DGSP_LAMBDA: usize = DGSP_N >> 3;
 /// set, it should not be changed for consistency. max = 255.
 pub const WOTSPLUS_ADRS_LAYER: u32 = 73;
 
-/// DGSP ν byte size.
-pub const DGSP_NU_BYTES: usize = 16;
+/// DGSP ζ byte size.
+pub const DGSP_ZETA_BYTES: usize = 16;
 
 /// DGSP WOTS+ rand byte size.
 pub const DGSP_WOTS_RAND_BYTES: usize = WTS_ADRS_RAND_BYTES + DGSP_N;
 
 /// DGSP signature byte size.
 pub const DGSP_BYTES: usize =
-    SPX_WOTS_BYTES + DGSP_NU_BYTES + SPX_BYTES + DGSP_WOTS_RAND_BYTES + DGSP_N;
+    SPX_WOTS_BYTES + DGSP_ZETA_BYTES + SPX_BYTES + DGSP_WOTS_RAND_BYTES + DGSP_N;
 
 /// DGSP public-key byte size.
 pub const DGSP_PK_BYTES: usize = SPX_PK_BYTES;
