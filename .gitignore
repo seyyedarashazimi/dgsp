@@ -8,3 +8,4 @@ temp_example_db_*
 dgsp_sphincs_*
 /examples/simple_db
 /benches/log_*/
+/examples/readme_test.rs

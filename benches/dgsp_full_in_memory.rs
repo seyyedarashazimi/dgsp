@@ -2,9 +2,9 @@
 
 use crate::bench_utils::*;
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
-use dgsp::dgsp::{DGSPManagerSecretKey, DGSP, DGSPMSK};
 use dgsp::params::DGSP_N;
-use dgsp::{InMemoryPLM, InMemoryRevokedList, PLMInterface, RevokedListInterface};
+use dgsp::scheme::{DGSPManagerSecretKey, DGSPSecret, DGSPMSK};
+use dgsp::{InMemoryPLM, InMemoryRevokedList, PLMInterface, RevokedListInterface, DGSP};
 use rand::rngs::OsRng;
 use rand::RngCore;
 use rayon::ThreadPoolBuilder;
@@ -13,7 +13,8 @@ use std::time::{Duration, Instant};
 
 mod bench_utils;
 
-const MSK: [u8; DGSP_N] = [170_u8; DGSP_N];
+const HASH_SECRET: [u8; DGSP_N] = [170_u8; DGSP_N];
+const AES_KEY: [u8; DGSP_N] = [85_u8; DGSP_N];
 const GROUP_SIZE: u64 = 1 << 10;
 const CERTIFICATE_ISSUED_SIZE: usize = 1;
 const TWEAK_USERS_SIZE: u64 = 10;
@@ -21,7 +22,7 @@ const TWEAK_USERS_SIZE: u64 = 10;
 fn initialize_plm_with_users() -> InMemoryPLM {
     let plm = InMemoryPLM::open("").unwrap();
     (0..GROUP_SIZE).for_each(|u| {
-        DGSP::join(&DGSPMSK::from(MSK), &u.to_string(), &plm).unwrap();
+        DGSP::join(&DGSPSecret::from(HASH_SECRET), &u.to_string(), &plm).unwrap();
     });
 
     plm
@@ -40,12 +41,12 @@ fn initialize_revoked_list() -> InMemoryRevokedList {
 
 fn tweak_plm_rl(plm: &InMemoryPLM, rl: &InMemoryRevokedList, skm: &DGSPManagerSecretKey) {
     for u in GROUP_SIZE..(GROUP_SIZE + TWEAK_USERS_SIZE) {
-        let (id, cid) = DGSP::join(&skm.msk, &u.to_string(), plm).unwrap();
+        let (id, cid) = DGSP::join(&skm.msk.hash_secret, &u.to_string(), plm).unwrap();
         let seed_u = DGSP::keygen_user();
         let (wots_pks, _) = DGSP::csr(&seed_u, CERTIFICATE_ISSUED_SIZE);
-        DGSP::gen_cert(&skm.msk, &skm.spx_sk, id, &cid, &wots_pks, plm).unwrap();
+        DGSP::gen_cert(skm, id, &cid, &wots_pks, plm).unwrap();
 
-        DGSP::revoke(&skm.msk, plm, &[id], rl).unwrap();
+        DGSP::revoke(&skm.msk.aes_key, plm, &[id], rl).unwrap();
     }
 }
 
@@ -60,7 +61,10 @@ fn dgsp_full_benchmarks(c: &mut Criterion) {
     );
 
     let (pkm, mut skm) = DGSP::keygen_manager().unwrap();
-    skm.msk = DGSPMSK::from(MSK);
+    skm.msk = DGSPMSK {
+        hash_secret: DGSPSecret::from(HASH_SECRET),
+        aes_key: DGSPSecret::from(AES_KEY),
+    };
 
     let pool = ThreadPoolBuilder::new().num_threads(1).build().unwrap();
 
@@ -108,7 +112,7 @@ fn dgsp_full_benchmarks(c: &mut Criterion) {
                     let start = Instant::now();
 
                     // Benchmark
-                    black_box(DGSP::join(&skm.msk, &username, &plm).unwrap());
+                    black_box(DGSP::join(&skm.msk.hash_secret, &username, &plm).unwrap());
 
                     // Stop timer
                     total += start.elapsed();
@@ -150,16 +154,13 @@ fn dgsp_full_benchmarks(c: &mut Criterion) {
         pool.install(|| {
             b.iter_custom(|num_iters| {
                 let username = counter.fetch_add(1, Ordering::Relaxed).to_string();
-                let (id, cid) = DGSP::join(&skm.msk, &username, &plm).unwrap();
+                let (id, cid) = DGSP::join(&skm.msk.hash_secret, &username, &plm).unwrap();
                 let seed_u = DGSP::keygen_user();
                 let (wots_pks, _) = DGSP::csr(&seed_u, CERTIFICATE_ISSUED_SIZE);
 
                 let start = Instant::now();
                 for _ in 0..num_iters {
-                    black_box(
-                        DGSP::gen_cert(&skm.msk, &skm.spx_sk, id, &cid, black_box(&wots_pks), &plm)
-                            .unwrap(),
-                    );
+                    black_box(DGSP::gen_cert(&skm, id, &cid, black_box(&wots_pks), &plm).unwrap());
                 }
                 start.elapsed()
             });
@@ -177,12 +178,11 @@ fn dgsp_full_benchmarks(c: &mut Criterion) {
         pool.install(|| {
             b.iter_custom(|num_iters| {
                 let username = counter.fetch_add(1, Ordering::Relaxed).to_string();
-                let (id, cid) = DGSP::join(&skm.msk, &username, &plm).unwrap();
+                let (id, cid) = DGSP::join(&skm.msk.hash_secret, &username, &plm).unwrap();
                 let seed_u = DGSP::keygen_user();
                 let mut message = [0u8; 1];
                 let (wots_pks, _) = DGSP::csr(&seed_u, CERTIFICATE_ISSUED_SIZE);
-                let certs =
-                    DGSP::gen_cert(&skm.msk, &skm.spx_sk, id, &cid, &wots_pks, &plm).unwrap();
+                let certs = DGSP::gen_cert(&skm, id, &cid, &wots_pks, &plm).unwrap();
                 OsRng.fill_bytes(&mut message);
 
                 let start = Instant::now();
@@ -212,12 +212,11 @@ fn dgsp_full_benchmarks(c: &mut Criterion) {
         pool.install(|| {
             b.iter_custom(|num_iters| {
                 let username = counter.fetch_add(1, Ordering::Relaxed).to_string();
-                let (id, cid) = DGSP::join(&skm.msk, &username, &plm).unwrap();
+                let (id, cid) = DGSP::join(&skm.msk.hash_secret, &username, &plm).unwrap();
                 let seed_u = DGSP::keygen_user();
                 let mut message = [0u8; 1];
                 let (wots_pks, mut wots_rands) = DGSP::csr(&seed_u, 1);
-                let mut certs =
-                    DGSP::gen_cert(&skm.msk, &skm.spx_sk, id, &cid, &wots_pks, &plm).unwrap();
+                let mut certs = DGSP::gen_cert(&skm, id, &cid, &wots_pks, &plm).unwrap();
                 let wots_rand = wots_rands.pop().unwrap();
                 let cert = certs.pop().unwrap();
                 OsRng.fill_bytes(&mut message);
@@ -249,12 +248,11 @@ fn dgsp_full_benchmarks(c: &mut Criterion) {
         pool.install(|| {
             b.iter_custom(|num_iters| {
                 let username = counter.fetch_add(1, Ordering::Relaxed).to_string();
-                let (id, cid) = DGSP::join(&skm.msk, &username, &plm).unwrap();
+                let (id, cid) = DGSP::join(&skm.msk.hash_secret, &username, &plm).unwrap();
                 let seed_u = DGSP::keygen_user();
                 let mut message = [0u8; 1];
                 let (wots_pks, mut wots_rands) = DGSP::csr(&seed_u, 1);
-                let mut certs =
-                    DGSP::gen_cert(&skm.msk, &skm.spx_sk, id, &cid, &wots_pks, &plm).unwrap();
+                let mut certs = DGSP::gen_cert(&skm, id, &cid, &wots_pks, &plm).unwrap();
                 let wots_rand = wots_rands.pop().unwrap();
                 let cert = certs.pop().unwrap();
                 OsRng.fill_bytes(&mut message);
@@ -282,12 +280,11 @@ fn dgsp_full_benchmarks(c: &mut Criterion) {
         pool.install(|| {
             b.iter_custom(|num_iters| {
                 let username = counter.fetch_add(1, Ordering::Relaxed).to_string();
-                let (id, cid) = DGSP::join(&skm.msk, &username, &plm).unwrap();
+                let (id, cid) = DGSP::join(&skm.msk.hash_secret, &username, &plm).unwrap();
                 let seed_u = DGSP::keygen_user();
                 let mut message = [0u8; 1];
                 let (wots_pks, mut wots_rands) = DGSP::csr(&seed_u, 1);
-                let mut certs =
-                    DGSP::gen_cert(&skm.msk, &skm.spx_sk, id, &cid, &wots_pks, &plm).unwrap();
+                let mut certs = DGSP::gen_cert(&skm, id, &cid, &wots_pks, &plm).unwrap();
                 let wots_rand = wots_rands.pop().unwrap();
                 let cert = certs.pop().unwrap();
                 OsRng.fill_bytes(&mut message);
@@ -313,12 +310,11 @@ fn dgsp_full_benchmarks(c: &mut Criterion) {
         pool.install(|| {
             b.iter_custom(|num_iters| {
                 let username = counter.fetch_add(1, Ordering::Relaxed).to_string();
-                let (id, cid) = DGSP::join(&skm.msk, &username, &plm).unwrap();
+                let (id, cid) = DGSP::join(&skm.msk.hash_secret, &username, &plm).unwrap();
                 let seed_u = DGSP::keygen_user();
                 let mut message = [0u8; 1];
                 let (wots_pks, mut wots_rands) = DGSP::csr(&seed_u, 1);
-                let mut certs =
-                    DGSP::gen_cert(&skm.msk, &skm.spx_sk, id, &cid, &wots_pks, &plm).unwrap();
+                let mut certs = DGSP::gen_cert(&skm, id, &cid, &wots_pks, &plm).unwrap();
                 let wots_rand = wots_rands.pop().unwrap();
                 let cert = certs.pop().unwrap();
                 OsRng.fill_bytes(&mut message);
@@ -352,18 +348,17 @@ fn dgsp_full_benchmarks(c: &mut Criterion) {
                 for _ in 0..num_iters {
                     // Precomputation
                     let username = counter.fetch_add(1, Ordering::Relaxed).to_string();
-                    let (id, cid) = DGSP::join(&skm.msk, &username, &plm).unwrap();
+                    let (id, cid) = DGSP::join(&skm.msk.hash_secret, &username, &plm).unwrap();
                     let seed_u = DGSP::keygen_user();
                     let (wots_pks, _) = DGSP::csr(&seed_u, CERTIFICATE_ISSUED_SIZE);
-                    black_box(
-                        DGSP::gen_cert(&skm.msk, &skm.spx_sk, id, &cid, &wots_pks, &plm).unwrap(),
-                    );
+                    black_box(DGSP::gen_cert(&skm, id, &cid, &wots_pks, &plm).unwrap());
 
                     // Start timer
                     let start = Instant::now();
 
                     // Benchmark
-                    let result = black_box(DGSP::revoke(&skm.msk, &plm, &[id], &revoked_list));
+                    let result =
+                        black_box(DGSP::revoke(&skm.msk.aes_key, &plm, &[id], &revoked_list));
 
                     // Stop timer
                     total += start.elapsed();

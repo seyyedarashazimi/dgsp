@@ -1,4 +1,4 @@
-use crate::dgsp::DGSPMSK;
+use crate::scheme::DGSPSecret;
 use aes::cipher::{generic_array::GenericArray, KeyInit};
 
 #[cfg(any(
@@ -32,7 +32,7 @@ impl DGSPCipher {
         feature = "sphincs_shake_128f",
         feature = "sphincs_shake_128s",
     ))]
-    pub(crate) fn cipher(msk: &DGSPMSK) -> Aes128 {
+    pub(crate) fn cipher(msk: &DGSPSecret) -> Aes128 {
         Aes128::new(GenericArray::from_slice(msk.as_ref()))
     }
     #[cfg(any(
@@ -41,7 +41,7 @@ impl DGSPCipher {
         feature = "sphincs_shake_192f",
         feature = "sphincs_shake_192s",
     ))]
-    pub(crate) fn cipher(msk: &DGSPMSK) -> Aes192 {
+    pub(crate) fn cipher(msk: &DGSPSecret) -> Aes192 {
         Aes192::new(GenericArray::from_slice(msk.as_ref()))
     }
     #[cfg(any(
@@ -50,7 +50,7 @@ impl DGSPCipher {
         feature = "sphincs_shake_256f",
         feature = "sphincs_shake_256s",
     ))]
-    pub(crate) fn cipher(msk: &DGSPMSK) -> Aes256 {
+    pub(crate) fn cipher(msk: &DGSPSecret) -> Aes256 {
         Aes256::new(GenericArray::from_slice(msk.as_ref()))
     }
 }

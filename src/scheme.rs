@@ -96,8 +96,7 @@
 //! #![cfg_attr(not(feature = "in-memory"), allow(dead_code))]
 //! #[cfg(feature = "in-memory")]
 //! {
-//! use dgsp::dgsp::DGSP;
-//! use dgsp::{InMemoryPLM, InMemoryRevokedList, PLMInterface, RevokedListInterface};
+//! use dgsp::{InMemoryPLM, InMemoryRevokedList, PLMInterface, RevokedListInterface, DGSP};
 //!
 //! // Create in-memory PLM and RevokedList
 //! let plm = InMemoryPLM::open("").expect("Failed to open in-memory PLM");
@@ -110,14 +109,14 @@
 //! // A user joins the group (the PLM stores the username, a unique ID, status, and a
 //! // certificate counter)
 //! let username = "Alice";
-//! let (user_id, cid) = DGSP::join(&skm.msk, username, &plm).expect("User join failed");
+//! let (user_id, cid) = DGSP::join(&skm.msk.hash_secret, username, &plm).expect("User join failed");
 //!
 //! // User generates a random seed and creates a certificate signing request (CSR)
 //! let seed_user = DGSP::keygen_user();
 //! let (wots_pks, wots_rands) = DGSP::csr(&seed_user, 1);
 //!
 //! // Manager generates a certificate for the user's CSR
-//! let certs = DGSP::gen_cert(&skm.msk, &skm.spx_sk, user_id, &cid, &wots_pks, &plm)
+//! let certs = DGSP::gen_cert(&skm, user_id, &cid, &wots_pks, &plm)
 //!     .expect("Certificate generation failed");
 //!
 //! // User checks the certificate validity
@@ -147,6 +146,9 @@
 //!
 //! // Judge the manager's correctness
 //! DGSP::judge(&sig, message, user_id, &pi).expect("Manager judgment failed");
+//!
+//! // Revoke the user
+//! DGSP::revoke(&skm.msk.aes_key, &plm, &[user_id], &revoked_list).unwrap();
 //! }
 //! ```
 //!
@@ -213,9 +215,19 @@ impl DGSPWotsRand {
     }
 }
 
-// Create a new type `DGSPMSK` (manager secret key material) as a wrapper
-// around a fixed-size array.
-array_struct!(DGSPMSK, DGSP_N);
+// Create a new type `DGSPSecret` as a wrapper around a fixed-size array.
+array_struct!(DGSPSecret, DGSP_N);
+
+/// The manager's secret key material, including the hash secret value and the AES key,
+/// each of them being `DGSP_N` secret bytes.
+#[cfg_attr(feature = "serialization", derive(Serialize, Deserialize))]
+#[derive(Clone, Zeroize, Debug, PartialEq)]
+pub struct DGSPMSK {
+    /// The hashing secret part, mainly used to calculate cid for a user.
+    pub hash_secret: DGSPSecret,
+    /// The AES key, used to encrypt zeta.
+    pub aes_key: DGSPSecret,
+}
 
 /// The manager's secret key, including the manager secret key material (`msk`)
 /// and the SPHINCS+ secret key.
@@ -276,11 +288,11 @@ pub struct DGSPSignature {
     /// The WOTS+ signature.
     #[cfg_attr(feature = "serialization", serde(with = "BigArray"))]
     pub wots_sig: [u8; SPX_WOTS_BYTES],
-    /// The one-time certificate created for the WOTS+ public key.
-    pub cert: DGSPCert,
     /// The randomness used by WOTS+ (both for the signature seed and the
     /// address freshness).
     pub wots_rand: DGSPWotsRand,
+    /// The one-time certificate created for the WOTS+ public key.
+    pub cert: DGSPCert,
     /// The binding value (tau) that is computed from the WOTS+ public key and
     /// the user id.
     pub tau: [u8; DGSP_N],
@@ -304,8 +316,15 @@ impl DGSP {
     /// `(DGSPManagerPublicKey, DGSPManagerSecretKey)` on success.
     pub fn keygen_manager() -> Result<(DGSPManagerPublicKey, DGSPManagerSecretKey)> {
         let (spx_pk, spx_sk) = SphincsPlus::keygen()?;
-        let mut msk = DGSPMSK::from([0u8; DGSP_N]);
-        OsRng.fill_bytes(&mut msk.0);
+        let mut hash_secret = DGSPSecret::from([0u8; DGSP_N]);
+        let mut aes_key = DGSPSecret::from([0u8; DGSP_N]);
+        OsRng.fill_bytes(&mut hash_secret.0);
+        OsRng.fill_bytes(&mut aes_key.0);
+
+        let msk = DGSPMSK {
+            hash_secret,
+            aes_key,
+        };
 
         let sk = DGSPManagerSecretKey { msk, spx_sk };
         let pk = DGSPManagerPublicKey { spx_pk };
@@ -321,7 +340,7 @@ impl DGSP {
     ///
     /// # Parameters
     ///
-    /// - `msk`: Reference to the manager secret key material.
+    /// - `hash_secret`: Reference to the manager's hash secret.
     /// - `username`: The username of the new user.
     /// - `plm`: A reference to an object implementing the `PLMInterface`.
     ///
@@ -330,12 +349,12 @@ impl DGSP {
     /// A `Result` containing a tuple `(user_id, cid)` on success. If the given
     /// username exists in the plm, this returns an error,
     pub fn join<P: PLMInterface>(
-        msk: &DGSPMSK,
+        hash_secret: &DGSPSecret,
         username: &str,
         plm: &P,
     ) -> Result<(u64, [u8; DGSP_N])> {
         let id = plm.add_new_user(username)?;
-        let cid = Self::calculate_cid(msk, id);
+        let cid = Self::calculate_cid(hash_secret, id);
         Ok((id, cid))
     }
 
@@ -347,8 +366,7 @@ impl DGSP {
     ///
     /// # Parameters
     ///
-    /// - `msk`: A reference to the manager secret key material.
-    /// - `sphincs_plus_secret_key`: A reference to the SPHINCS+ secret key.
+    /// - `manager_sk`: A reference to the manager secret key.
     /// - `id`: The user's identifier.
     /// - `cid`: A reference to the user's credential identifier.
     /// - `wotsplus_public_keys`: A slice of WOTS+ public keys (each of size
@@ -359,18 +377,16 @@ impl DGSP {
     ///
     /// A `Result` containing a vector of `DGSPCert` objects on success.
     pub fn gen_cert<P: PLMInterface>(
-        msk: &DGSPMSK,
-        sphincs_plus_secret_key: &SphincsPlusSecretKey,
+        manager_sk: &DGSPManagerSecretKey,
         id: u64,
         cid: &[u8; DGSP_N],
         wotsplus_public_keys: &[[u8; DGSP_N]],
         plm: &P,
     ) -> Result<Vec<DGSPCert>> {
-        Self::req_validity(msk, id, cid, plm)?;
+        Self::req_validity(&manager_sk.msk.hash_secret, id, cid, plm)?;
 
         let certs = Self::par_calculate_certificates(
-            msk,
-            sphincs_plus_secret_key,
+            manager_sk,
             id,
             cid,
             wotsplus_public_keys,
@@ -405,15 +421,14 @@ impl DGSP {
     ///
     /// A `Result` containing a vector of `DGSPCert` objects.
     fn par_calculate_certificates(
-        msk: &DGSPMSK,
-        sphincs_plus_sk: &SphincsPlusSecretKey,
+        manager_sk: &DGSPManagerSecretKey,
         id: u64,
         cid: &[u8; DGSP_N],
         wotsplus_public_keys: &[[u8; DGSP_N]],
         ctr_id: u64,
     ) -> Result<Vec<DGSPCert>> {
         // Initialize the AES cipher using the manager secret key material.
-        let cipher = DGSPCipher::cipher(msk);
+        let cipher = DGSPCipher::cipher(&manager_sk.msk.aes_key);
 
         wotsplus_public_keys
             .par_iter()
@@ -435,7 +450,7 @@ impl DGSP {
 
                 // Prepare the message to be signed with SPHINCS+.
                 let spx_msg = Self::prepare_spx_msg(wots_pk, &zeta, &tau);
-                let spx_sig = SphincsPlus::sign(&spx_msg, sphincs_plus_sk)?;
+                let spx_sig = SphincsPlus::sign(&spx_msg, &manager_sk.spx_sk)?;
 
                 let cert = DGSPCert { zeta, spx_sig };
 
@@ -454,7 +469,7 @@ impl DGSP {
     ///
     /// # Parameters
     ///
-    /// - `msk`: A reference to the manager secret key material.
+    /// - `aes_key`: A reference to the manager's AES key.
     /// - `plm`: A reference to an object implementing `PLMInterface`.
     /// - `to_be_revoked`: A slice of user IDs to be revoked.
     /// - `revoked_list`: A reference to an object implementing
@@ -465,14 +480,14 @@ impl DGSP {
     /// A `Result<()>` equal to `Ok(())` indicating success, or an error
     /// `Err(dgsp::Error)`.
     pub fn revoke<P: PLMInterface, R: RevokedListInterface>(
-        msk: &DGSPMSK,
+        aes_key: &DGSPSecret,
         plm: &P,
         to_be_revoked: &[u64],
         revoked_list: &R,
     ) -> Result<()> {
         for &r in to_be_revoked {
             if plm.id_exists(r)? && plm.id_is_active(r)? {
-                let zeta_list = Self::par_calculate_zeta(msk, r, 0, plm.get_ctr_id(r)?);
+                let zeta_list = Self::par_calculate_zeta(aes_key, r, 0, plm.get_ctr_id(r)?);
                 for zeta in zeta_list {
                     revoked_list.insert(zeta)?;
                 }
@@ -508,7 +523,7 @@ impl DGSP {
         let mut zeta = sig.cert.zeta;
         let block = GenericArray::from_mut_slice(&mut zeta);
 
-        let cipher = DGSPCipher::cipher(msk);
+        let cipher = DGSPCipher::cipher(&msk.aes_key);
         cipher.decrypt_block(block);
 
         let id = bytes_to_u64(&zeta[..8]);
@@ -520,7 +535,7 @@ impl DGSP {
         let wots_pk = wp.pk_from_sig(&sig.wots_sig, message);
 
         // Calculate pi from msk, the WOTS+ public key. and the user's credential.
-        let cid = Self::calculate_cid(msk, id);
+        let cid = Self::calculate_cid(&msk.hash_secret, id);
         let pi = Self::calculate_pi(&wots_pk, &cid);
 
         Ok((id, plm.get_username(id)?, pi))
@@ -592,15 +607,15 @@ impl DGSP {
     ///
     /// # Parameters
     ///
-    /// - `msk`: The manager secret key material.
+    /// - `hash_secret`: Reference to the manager's hash secret.
     /// - `id`: The user’s identifier.
     ///
     /// # Returns
     ///
     /// A `[u8; DGSP_N]` array representing the certificate identifier.
-    fn calculate_cid(msk: &DGSPMSK, id: u64) -> [u8; DGSP_N] {
+    fn calculate_cid(hash_secret: &DGSPSecret, id: u64) -> [u8; DGSP_N] {
         let mut input = [0u8; DGSP_N + DGSP_USER_BYTES];
-        input[..DGSP_N].copy_from_slice(msk.as_ref());
+        input[..DGSP_N].copy_from_slice(hash_secret.as_ref());
         input[DGSP_N..].copy_from_slice(u64_to_bytes(id).as_ref());
         Self::hash_simple(&input)
     }
@@ -641,7 +656,7 @@ impl DGSP {
     ///
     /// # Parameters
     ///
-    /// - `msk`: The manager secret key material.
+    /// - `hash_secret`: Reference to the manager's hash secret.
     /// - `id`: The user’s identifier.
     /// - `cid`: The provided user credential.
     /// - `plm`: A reference to an object implementing `PLMInterface`.
@@ -650,7 +665,7 @@ impl DGSP {
     ///
     /// An empty `Result` on success or an error if the request is invalid.
     fn req_validity<P: PLMInterface>(
-        msk: &DGSPMSK,
+        hash_secret: &DGSPSecret,
         id: u64,
         cid: &[u8; DGSP_N],
         plm: &P,
@@ -661,7 +676,7 @@ impl DGSP {
         }
 
         // check if user cid is correct
-        if *cid != Self::calculate_cid(msk, id) {
+        if *cid != Self::calculate_cid(hash_secret, id) {
             return Err(Error::InvalidCertReq);
         }
         Ok(())
@@ -675,7 +690,7 @@ impl DGSP {
     ///
     /// # Parameters
     ///
-    /// - `msk`: The manager secret key material.
+    /// - `aes_key`: A reference to the manager's AES key.
     /// - `id`: The user’s identifier.
     /// - `ctr_id`: The starting counter value.
     /// - `b`: The number of blocks to compute.
@@ -684,12 +699,12 @@ impl DGSP {
     ///
     /// A vector of `[u8; DGSP_ZETA_BYTES]` arrays.
     fn par_calculate_zeta(
-        msk: &DGSPMSK,
+        aes_key: &DGSPSecret,
         id: u64,
         ctr_id: u64,
         b: u64,
     ) -> Vec<[u8; DGSP_ZETA_BYTES]> {
-        let cipher = DGSPCipher::cipher(msk);
+        let cipher = DGSPCipher::cipher(aes_key);
 
         // Perform parallel encryption
         (0..b)
@@ -795,8 +810,8 @@ impl DGSP {
 
         DGSPSignature {
             wots_sig,
-            cert,
             wots_rand,
+            cert,
             tau,
         }
     }
@@ -975,14 +990,14 @@ mod tests {
         // Create a user and join to DGSP
         let seed = DGSP::keygen_user();
         let username = random_str(10);
-        let (id, cid) = DGSP::join(&skm.msk, username.as_str(), &plm).unwrap();
+        let (id, cid) = DGSP::join(&skm.msk.hash_secret, username.as_str(), &plm).unwrap();
 
         // Create a batch of CSR
         const B: usize = 3;
         let (mut wots_pks, mut wots_rands) = DGSP::csr(&seed, B);
 
         // Obtain certificates for the given csr batch
-        let mut certs = DGSP::gen_cert(&skm.msk, &skm.spx_sk, id, &cid, &wots_pks, &plm).unwrap();
+        let mut certs = DGSP::gen_cert(&skm, id, &cid, &wots_pks, &plm).unwrap();
 
         // Make sure the given certificates are correctly created by the manager.
         DGSP::check_cert(id, &cid, &wots_pks, &certs, &pkm).unwrap();
@@ -1009,7 +1024,7 @@ mod tests {
         DGSP::judge(&sig, &message, id, &pi).unwrap();
 
         // Revoke a user and its certificates
-        DGSP::revoke(&skm.msk, &plm, &[id], &revoked_list).unwrap();
+        DGSP::revoke(&skm.msk.aes_key, &plm, &[id], &revoked_list).unwrap();
         assert!(revoked_list.contains(&sig.cert.zeta).unwrap());
 
         for cert in &certs {
@@ -1019,7 +1034,7 @@ mod tests {
         // Make sure no cert will be created for that id from now on.
         let (wots_pks_new, _) = DGSP::csr(&seed, 1);
         assert_eq!(
-            DGSP::gen_cert(&skm.msk, &skm.spx_sk, id, &cid, &wots_pks_new, &plm),
+            DGSP::gen_cert(&skm, id, &cid, &wots_pks_new, &plm),
             Err(Error::InvalidCertReq)
         );
 
@@ -1055,7 +1070,7 @@ mod tests {
 
         let seed_u0 = DGSP::keygen_user();
         let username_u0 = "dgsp user 0";
-        let (id_u0, cid_u0) = DGSP::join(&skm.msk, username_u0, &plm).unwrap();
+        let (id_u0, cid_u0) = DGSP::join(&skm.msk.hash_secret, username_u0, &plm).unwrap();
 
         const B: usize = 1;
         let (mut wots_pks, mut wots_rands) = DGSP::csr(&seed_u0, B);
@@ -1064,17 +1079,14 @@ mod tests {
         let fake_id = 6u64;
         let mut fake_cid = cid_u0;
         fake_cid[0] ^= 1;
-        assert!(DGSP::gen_cert(&skm.msk, &skm.spx_sk, fake_id, &cid_u0, &wots_pks, &plm).is_err());
+        assert!(DGSP::gen_cert(&skm, fake_id, &cid_u0, &wots_pks, &plm).is_err());
         assert_eq!(
-            DGSP::gen_cert(&skm.msk, &skm.spx_sk, id_u0, &fake_cid, &wots_pks, &plm),
+            DGSP::gen_cert(&skm, id_u0, &fake_cid, &wots_pks, &plm),
             Err(Error::InvalidCertReq)
         );
-        assert!(
-            DGSP::gen_cert(&skm.msk, &skm.spx_sk, fake_id, &fake_cid, &wots_pks, &plm).is_err()
-        );
+        assert!(DGSP::gen_cert(&skm, fake_id, &fake_cid, &wots_pks, &plm).is_err());
 
-        let mut certs =
-            DGSP::gen_cert(&skm.msk, &skm.spx_sk, id_u0, &cid_u0, &wots_pks, &plm).unwrap();
+        let mut certs = DGSP::gen_cert(&skm, id_u0, &cid_u0, &wots_pks, &plm).unwrap();
         DGSP::check_cert(id_u0, &cid_u0, &wots_pks, &certs, &pkm).unwrap();
 
         let wots_pk = wots_pks.pop().unwrap();
@@ -1117,7 +1129,7 @@ mod tests {
 
         // A new user joins the group
         let username_u1 = "dgsp user 1";
-        let (id_u1, _) = DGSP::join(&skm.msk, username_u1, &plm).unwrap();
+        let (id_u1, _) = DGSP::join(&skm.msk.hash_secret, username_u1, &plm).unwrap();
 
         assert_eq!(
             DGSP::open(&skm.msk, &plm, &sig, &message).unwrap(),
@@ -1150,9 +1162,9 @@ mod tests {
         let (_, skm) = DGSP::keygen_manager().unwrap();
 
         let username = random_str(10);
-        DGSP::join(&skm.msk, username.as_str(), &plm).unwrap();
+        DGSP::join(&skm.msk.hash_secret, username.as_str(), &plm).unwrap();
         assert_eq!(
-            DGSP::join(&skm.msk, username.as_str(), &plm),
+            DGSP::join(&skm.msk.hash_secret, username.as_str(), &plm),
             Err(Error::UsernameAlreadyExists(username))
         );
     }
@@ -1174,35 +1186,33 @@ mod tests {
 
         let seed_u0 = DGSP::keygen_user();
         let username_u0 = "dgsp user 0";
-        let (id_u0, cid_u0) = DGSP::join(&skm.msk, username_u0, &plm).unwrap();
+        let (id_u0, cid_u0) = DGSP::join(&skm.msk.hash_secret, username_u0, &plm).unwrap();
 
         const B: usize = 1;
         let (wots_pks, _) = DGSP::csr(&seed_u0, B);
-        DGSP::gen_cert(&skm.msk, &skm.spx_sk, id_u0, &cid_u0, &wots_pks, &plm).unwrap();
+        DGSP::gen_cert(&skm, id_u0, &cid_u0, &wots_pks, &plm).unwrap();
 
         // Test manager with fake credentials:
         let fake_id = id_u0 ^ 1u64;
         let mut fake_cid = cid_u0;
         fake_cid[0] ^= 1u8;
-        assert!(DGSP::gen_cert(&skm.msk, &skm.spx_sk, fake_id, &cid_u0, &wots_pks, &plm).is_err());
+        assert!(DGSP::gen_cert(&skm, fake_id, &cid_u0, &wots_pks, &plm).is_err());
         assert_eq!(
-            DGSP::gen_cert(&skm.msk, &skm.spx_sk, id_u0, &fake_cid, &wots_pks, &plm),
+            DGSP::gen_cert(&skm, id_u0, &fake_cid, &wots_pks, &plm),
             Err(Error::InvalidCertReq)
         );
-        assert!(
-            DGSP::gen_cert(&skm.msk, &skm.spx_sk, fake_id, &fake_cid, &wots_pks, &plm).is_err()
-        );
+        assert!(DGSP::gen_cert(&skm, fake_id, &fake_cid, &wots_pks, &plm).is_err());
 
         let username_u1 = "dgsp user 1";
-        let (id_u1, cid_u1) = DGSP::join(&skm.msk, username_u1, &plm).unwrap();
+        let (id_u1, cid_u1) = DGSP::join(&skm.msk.hash_secret, username_u1, &plm).unwrap();
 
         // Test manager with incorrect credentials:
         assert_eq!(
-            DGSP::gen_cert(&skm.msk, &skm.spx_sk, id_u0, &cid_u1, &wots_pks, &plm),
+            DGSP::gen_cert(&skm, id_u0, &cid_u1, &wots_pks, &plm),
             Err(Error::InvalidCertReq)
         );
         assert_eq!(
-            DGSP::gen_cert(&skm.msk, &skm.spx_sk, id_u1, &cid_u0, &wots_pks, &plm),
+            DGSP::gen_cert(&skm, id_u1, &cid_u0, &wots_pks, &plm),
             Err(Error::InvalidCertReq)
         );
     }
@@ -1224,12 +1234,12 @@ mod tests {
 
         let seed = DGSP::keygen_user();
         let username = "dgsp user";
-        let (id, cid) = DGSP::join(&skm.msk, username, &plm).unwrap();
+        let (id, cid) = DGSP::join(&skm.msk.hash_secret, username, &plm).unwrap();
 
         const B: usize = 2;
         let (mut wots_pks, mut wots_rands) = DGSP::csr(&seed, B);
 
-        let mut certs = DGSP::gen_cert(&skm.msk, &skm.spx_sk, id, &cid, &wots_pks, &plm).unwrap();
+        let mut certs = DGSP::gen_cert(&skm, id, &cid, &wots_pks, &plm).unwrap();
         DGSP::check_cert(id, &cid, &wots_pks, &certs, &pkm).unwrap();
 
         // Unequal lengths of WOTS+ pk list and certificate list
@@ -1286,12 +1296,11 @@ mod tests {
 
         let seed_u0 = DGSP::keygen_user();
         let username_u0 = "dgsp user 0";
-        let (id_u0, cid_u0) = DGSP::join(&skm.msk, username_u0, &plm).unwrap();
+        let (id_u0, cid_u0) = DGSP::join(&skm.msk.hash_secret, username_u0, &plm).unwrap();
 
         const B: usize = 1;
         let (wots_pks, mut wots_rands) = DGSP::csr(&seed_u0, B);
-        let mut certs =
-            DGSP::gen_cert(&skm.msk, &skm.spx_sk, id_u0, &cid_u0, &wots_pks, &plm).unwrap();
+        let mut certs = DGSP::gen_cert(&skm, id_u0, &cid_u0, &wots_pks, &plm).unwrap();
 
         let m = random_message();
         let wr = wots_rands.pop().unwrap();
@@ -1321,15 +1330,14 @@ mod tests {
 
         let seed_u0 = DGSP::keygen_user();
         let username_u0 = "dgsp user 0";
-        let (id_u0, cid_u0) = DGSP::join(&skm.msk, username_u0, &plm).unwrap();
+        let (id_u0, cid_u0) = DGSP::join(&skm.msk.hash_secret, username_u0, &plm).unwrap();
 
         let mut seed_u1 = seed_u0;
         seed_u1[0] ^= 1;
 
         const B: usize = 1;
         let (wots_pks, mut wots_rands) = DGSP::csr(&seed_u0, B);
-        let mut certs =
-            DGSP::gen_cert(&skm.msk, &skm.spx_sk, id_u0, &cid_u0, &wots_pks, &plm).unwrap();
+        let mut certs = DGSP::gen_cert(&skm, id_u0, &cid_u0, &wots_pks, &plm).unwrap();
 
         let m = random_message();
         let wr = wots_rands.pop().unwrap();
@@ -1363,15 +1371,14 @@ mod tests {
 
         let seed_u0 = DGSP::keygen_user();
         let username_u0 = "dgsp user 0";
-        let (id_u0, cid_u0) = DGSP::join(&skm.msk, username_u0, &plm).unwrap();
+        let (id_u0, cid_u0) = DGSP::join(&skm.msk.hash_secret, username_u0, &plm).unwrap();
 
         let username_u1 = "dgsp user 1";
-        let (id_u1, _) = DGSP::join(&skm.msk, username_u1, &plm).unwrap();
+        let (id_u1, _) = DGSP::join(&skm.msk.hash_secret, username_u1, &plm).unwrap();
 
         const B: usize = 1;
         let (wots_pks, mut wots_rands) = DGSP::csr(&seed_u0, B);
-        let mut certs =
-            DGSP::gen_cert(&skm.msk, &skm.spx_sk, id_u0, &cid_u0, &wots_pks, &plm).unwrap();
+        let mut certs = DGSP::gen_cert(&skm, id_u0, &cid_u0, &wots_pks, &plm).unwrap();
 
         let m = random_message();
         let wr = wots_rands.pop().unwrap();
@@ -1405,15 +1412,14 @@ mod tests {
 
         let seed_u0 = DGSP::keygen_user();
         let username_u0 = "dgsp user 0";
-        let (id_u0, cid_u0) = DGSP::join(&skm.msk, username_u0, &plm).unwrap();
+        let (id_u0, cid_u0) = DGSP::join(&skm.msk.hash_secret, username_u0, &plm).unwrap();
 
         let username_u1 = "dgsp user 1";
-        let (_, cid_u1) = DGSP::join(&skm.msk, username_u1, &plm).unwrap();
+        let (_, cid_u1) = DGSP::join(&skm.msk.hash_secret, username_u1, &plm).unwrap();
 
         const B: usize = 1;
         let (wots_pks, mut wots_rands) = DGSP::csr(&seed_u0, B);
-        let mut certs =
-            DGSP::gen_cert(&skm.msk, &skm.spx_sk, id_u0, &cid_u0, &wots_pks, &plm).unwrap();
+        let mut certs = DGSP::gen_cert(&skm, id_u0, &cid_u0, &wots_pks, &plm).unwrap();
 
         let m = random_message();
         let wr = wots_rands.pop().unwrap();
@@ -1447,12 +1453,11 @@ mod tests {
 
         let seed_u0 = DGSP::keygen_user();
         let username_u0 = "dgsp user 0";
-        let (id_u0, cid_u0) = DGSP::join(&skm.msk, username_u0, &plm).unwrap();
+        let (id_u0, cid_u0) = DGSP::join(&skm.msk.hash_secret, username_u0, &plm).unwrap();
 
         const B: usize = 1;
         let (wots_pks, mut wots_rands) = DGSP::csr(&seed_u0, B);
-        let mut certs =
-            DGSP::gen_cert(&skm.msk, &skm.spx_sk, id_u0, &cid_u0, &wots_pks, &plm).unwrap();
+        let mut certs = DGSP::gen_cert(&skm, id_u0, &cid_u0, &wots_pks, &plm).unwrap();
 
         let m = random_message();
         let wr = wots_rands.pop().unwrap();
@@ -1494,12 +1499,11 @@ mod tests {
 
         let seed_u0 = DGSP::keygen_user();
         let username_u0 = "dgsp user 0";
-        let (id_u0, cid_u0) = DGSP::join(&skm.msk, username_u0, &plm).unwrap();
+        let (id_u0, cid_u0) = DGSP::join(&skm.msk.hash_secret, username_u0, &plm).unwrap();
 
         const B: usize = 1;
         let (wots_pks, mut wots_rands) = DGSP::csr(&seed_u0, B);
-        let mut certs =
-            DGSP::gen_cert(&skm.msk, &skm.spx_sk, id_u0, &cid_u0, &wots_pks, &plm).unwrap();
+        let mut certs = DGSP::gen_cert(&skm, id_u0, &cid_u0, &wots_pks, &plm).unwrap();
 
         let m = random_message();
         let wr = wots_rands.pop().unwrap();
@@ -1541,12 +1545,11 @@ mod tests {
 
         let seed_u0 = DGSP::keygen_user();
         let username_u0 = "dgsp user 0";
-        let (id_u0, cid_u0) = DGSP::join(&skm.msk, username_u0, &plm).unwrap();
+        let (id_u0, cid_u0) = DGSP::join(&skm.msk.hash_secret, username_u0, &plm).unwrap();
 
         const B: usize = 1;
         let (wots_pks, mut wots_rands) = DGSP::csr(&seed_u0, B);
-        let mut certs =
-            DGSP::gen_cert(&skm.msk, &skm.spx_sk, id_u0, &cid_u0, &wots_pks, &plm).unwrap();
+        let mut certs = DGSP::gen_cert(&skm, id_u0, &cid_u0, &wots_pks, &plm).unwrap();
 
         let m = random_message();
         let wr = wots_rands.pop().unwrap();
@@ -1588,12 +1591,11 @@ mod tests {
 
         let seed_u0 = DGSP::keygen_user();
         let username_u0 = "dgsp user 0";
-        let (id_u0, cid_u0) = DGSP::join(&skm.msk, username_u0, &plm).unwrap();
+        let (id_u0, cid_u0) = DGSP::join(&skm.msk.hash_secret, username_u0, &plm).unwrap();
 
         const B: usize = 1;
         let (wots_pks, mut wots_rands) = DGSP::csr(&seed_u0, B);
-        let mut certs =
-            DGSP::gen_cert(&skm.msk, &skm.spx_sk, id_u0, &cid_u0, &wots_pks, &plm).unwrap();
+        let mut certs = DGSP::gen_cert(&skm, id_u0, &cid_u0, &wots_pks, &plm).unwrap();
 
         let m = random_message();
         let wr = wots_rands.pop().unwrap();
@@ -1636,12 +1638,11 @@ mod tests {
 
         let seed_u0 = DGSP::keygen_user();
         let username_u0 = "dgsp user 0";
-        let (id_u0, cid_u0) = DGSP::join(&skm.msk, username_u0, &plm).unwrap();
+        let (id_u0, cid_u0) = DGSP::join(&skm.msk.hash_secret, username_u0, &plm).unwrap();
 
         const B: usize = 1;
         let (wots_pks, mut wots_rands) = DGSP::csr(&seed_u0, B);
-        let mut certs =
-            DGSP::gen_cert(&skm.msk, &skm.spx_sk, id_u0, &cid_u0, &wots_pks, &plm).unwrap();
+        let mut certs = DGSP::gen_cert(&skm, id_u0, &cid_u0, &wots_pks, &plm).unwrap();
 
         let m = random_message();
         let wr = wots_rands.pop().unwrap();
@@ -1677,12 +1678,11 @@ mod tests {
 
         let seed_u0 = DGSP::keygen_user();
         let username_u0 = "dgsp user 0";
-        let (id_u0, cid_u0) = DGSP::join(&skm.msk, username_u0, &plm).unwrap();
+        let (id_u0, cid_u0) = DGSP::join(&skm.msk.hash_secret, username_u0, &plm).unwrap();
 
         const B: usize = 1;
         let (wots_pks, mut wots_rands) = DGSP::csr(&seed_u0, B);
-        let mut certs =
-            DGSP::gen_cert(&skm.msk, &skm.spx_sk, id_u0, &cid_u0, &wots_pks, &plm).unwrap();
+        let mut certs = DGSP::gen_cert(&skm, id_u0, &cid_u0, &wots_pks, &plm).unwrap();
 
         let m = random_message();
         let wr = wots_rands.pop().unwrap();
@@ -1724,12 +1724,11 @@ mod tests {
 
         let seed_u0 = DGSP::keygen_user();
         let username_u0 = "dgsp user 0";
-        let (id_u0, cid_u0) = DGSP::join(&skm.msk, username_u0, &plm).unwrap();
+        let (id_u0, cid_u0) = DGSP::join(&skm.msk.hash_secret, username_u0, &plm).unwrap();
 
         const B: usize = 1;
         let (wots_pks, mut wots_rands) = DGSP::csr(&seed_u0, B);
-        let mut certs =
-            DGSP::gen_cert(&skm.msk, &skm.spx_sk, id_u0, &cid_u0, &wots_pks, &plm).unwrap();
+        let mut certs = DGSP::gen_cert(&skm, id_u0, &cid_u0, &wots_pks, &plm).unwrap();
 
         let m = random_message();
         let wr = wots_rands.pop().unwrap();
@@ -1774,12 +1773,11 @@ mod tests {
 
         let seed_u0 = DGSP::keygen_user();
         let username_u0 = "dgsp user 0";
-        let (id_u0, cid_u0) = DGSP::join(&skm.msk, username_u0, &plm).unwrap();
+        let (id_u0, cid_u0) = DGSP::join(&skm.msk.hash_secret, username_u0, &plm).unwrap();
 
         const B: usize = 1;
         let (wots_pks, mut wots_rands) = DGSP::csr(&seed_u0, B);
-        let mut certs =
-            DGSP::gen_cert(&skm.msk, &skm.spx_sk, id_u0, &cid_u0, &wots_pks, &plm).unwrap();
+        let mut certs = DGSP::gen_cert(&skm, id_u0, &cid_u0, &wots_pks, &plm).unwrap();
 
         let m = random_message();
         let wr = wots_rands.pop().unwrap();
@@ -1825,12 +1823,11 @@ mod tests {
 
         let seed_u0 = DGSP::keygen_user();
         let username_u0 = "dgsp user 0";
-        let (id_u0, cid_u0) = DGSP::join(&skm.msk, username_u0, &plm).unwrap();
+        let (id_u0, cid_u0) = DGSP::join(&skm.msk.hash_secret, username_u0, &plm).unwrap();
 
         const B: usize = 1;
         let (wots_pks, mut wots_rands) = DGSP::csr(&seed_u0, B);
-        let mut certs =
-            DGSP::gen_cert(&skm.msk, &skm.spx_sk, id_u0, &cid_u0, &wots_pks, &plm).unwrap();
+        let mut certs = DGSP::gen_cert(&skm, id_u0, &cid_u0, &wots_pks, &plm).unwrap();
 
         let m = random_message();
         let wr = wots_rands.pop().unwrap();
@@ -1875,12 +1872,11 @@ mod tests {
 
         let seed_u0 = DGSP::keygen_user();
         let username_u0 = "dgsp user 0";
-        let (id_u0, cid_u0) = DGSP::join(&skm.msk, username_u0, &plm).unwrap();
+        let (id_u0, cid_u0) = DGSP::join(&skm.msk.hash_secret, username_u0, &plm).unwrap();
 
         const B: usize = 1;
         let (wots_pks, mut wots_rands) = DGSP::csr(&seed_u0, B);
-        let mut certs =
-            DGSP::gen_cert(&skm.msk, &skm.spx_sk, id_u0, &cid_u0, &wots_pks, &plm).unwrap();
+        let mut certs = DGSP::gen_cert(&skm, id_u0, &cid_u0, &wots_pks, &plm).unwrap();
 
         let m = random_message();
         let wr = wots_rands.pop().unwrap();
@@ -1925,12 +1921,11 @@ mod tests {
 
         let seed_u0 = DGSP::keygen_user();
         let username_u0 = "dgsp user 0";
-        let (id_u0, cid_u0) = DGSP::join(&skm.msk, username_u0, &plm).unwrap();
+        let (id_u0, cid_u0) = DGSP::join(&skm.msk.hash_secret, username_u0, &plm).unwrap();
 
         const B: usize = 1;
         let (wots_pks, mut wots_rands) = DGSP::csr(&seed_u0, B);
-        let mut certs =
-            DGSP::gen_cert(&skm.msk, &skm.spx_sk, id_u0, &cid_u0, &wots_pks, &plm).unwrap();
+        let mut certs = DGSP::gen_cert(&skm, id_u0, &cid_u0, &wots_pks, &plm).unwrap();
 
         let m = random_message();
         let wr = wots_rands.pop().unwrap();
@@ -1969,13 +1964,12 @@ mod tests {
 
         let seed_u0 = DGSP::keygen_user();
         let username_u0 = "dgsp user 0";
-        let (id_u0, cid_u0) = DGSP::join(&skm.msk, username_u0, &plm).unwrap();
+        let (id_u0, cid_u0) = DGSP::join(&skm.msk.hash_secret, username_u0, &plm).unwrap();
 
         const B: usize = 1;
         let (mut wots_pks, mut wots_rands) = DGSP::csr(&seed_u0, B);
 
-        let mut certs =
-            DGSP::gen_cert(&skm.msk, &skm.spx_sk, id_u0, &cid_u0, &wots_pks, &plm).unwrap();
+        let mut certs = DGSP::gen_cert(&skm, id_u0, &cid_u0, &wots_pks, &plm).unwrap();
 
         let wots_pk = wots_pks.pop().unwrap();
         let cert = certs.pop().unwrap();
@@ -1987,7 +1981,7 @@ mod tests {
 
         // A new user joins the group
         let username_u1 = "dgsp user 1";
-        let (id_u1, _) = DGSP::join(&skm.msk, username_u1, &plm).unwrap();
+        let (id_u1, _) = DGSP::join(&skm.msk.hash_secret, username_u1, &plm).unwrap();
 
         assert_eq!(
             DGSP::open(&skm.msk, &plm, &sig, &message).unwrap(),

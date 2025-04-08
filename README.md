@@ -19,53 +19,6 @@ and real-world applications requiring long-term security.
 
 ---
 
-## DGSP paper
-
-To obtain more info about DGSP group signature scheme, please refer to:
-
-> PAPER CITE.
-
-Find the paper at https://eprint.iacr.org/2025/XXXX
-
-Please cite this work when referring to DGSP:
-```bibtex
-bibtex cite
-```
-
-[//]: # (```bibtex)
-
-[//]: # (@inproceedings{SSR:KSSW22,)
-
-[//]: # (  author    = {Matthias J. Kannwischer and)
-
-[//]: # (               Peter Schwabe and)
-
-[//]: # (               Douglas Stebila and)
-
-[//]: # (               Thom Wiggers},)
-
-[//]: # (  title     = {Improving Software Quality in Cryptography Standardization Projects},)
-
-[//]: # (  booktitle = {{IEEE} European Symposium on Security and Privacy, EuroS{\&}P 2022 - Workshops, Genoa, Italy, June 6-10, 2022},)
-
-[//]: # (  pages     = {19--30},)
-
-[//]: # (  publisher = {IEEE Computer Society},)
-
-[//]: # (  address   = {Los Alamitos, CA, USA},)
-
-[//]: # (  year      = {2022},)
-
-[//]: # (  url       = {https://eprint.iacr.org/2022/337},)
-
-[//]: # (  doi       = {10.1109/EuroSPW55150.2022.00010},)
-
-[//]: # (})
-
-[//]: # (```)
-
----
-
 ## Features
 
 ### Core Functionalities
@@ -96,7 +49,7 @@ bibtex cite
 - Is resistant to quantum adversaries.
 - Provides **user anonymity**, **unforgeability**, **traceability**, and **correctness**.
 - Ensures sensitive cryptographic material is securely wiped from memory when no longer needed by zeroizing them.
-- Does not assume a trusted manager as manager can be audited as well.
+- Manager's behavior can be audited and judged.
 
 ### Scalability and Efficiency
 
@@ -231,10 +184,7 @@ dgsp = { version = "0.1.0", default-features = false, features = ["in-disk", "sp
 Generate manager keys, and open private list of the manager and public revoked list databases:
 
 ```rust,ignore
-use dgsp::dgsp::DGSP;
-use dgsp::{InMemoryPLM, InMemoryRevokedList};
-use dgsp::{InDiskPLM, InDiskRevokedList};
-use std::path::PathBuf;
+use dgsp::*;
 
 // generate manager keypairs:
 let (pkm, skm) = DGSP::keygen_manager().unwrap();
@@ -244,9 +194,10 @@ let plm = InMemoryPLM::open("").unwrap();
 let revoked_list = InMemoryRevokedList::open("").unwrap();
 
 // or generate plm and revoked_list using in-disk feature
+use std::path::PathBuf;
 let path = PathBuf::new();
-let plm = InMemoryPLM::open(&path).unwrap();
-let revoked_list = InMemoryRevokedList::open(&path).unwrap();
+let plm = InDiskPLM::open(&path).unwrap();
+let revoked_list = InDiskRevokedList::open(&path).unwrap();
 ```
 
 ### User Setup
@@ -255,7 +206,7 @@ A user joins the system and obtains their unique ID and cryptographic identifier
 
 ```rust,ignore
 let username = "alice";
-let (id, cid) = DGSP::join(&skm.msk, username, &plm).unwrap();
+let (id, cid) = DGSP::join(&skm.msk.hash_secret, username, &plm).unwrap();
 ```
 
 The user also generate a private seed:
@@ -275,7 +226,7 @@ let (wots_pks, mut wots_rands) = DGSP::csr(&seed_u, batch_size);
 
 Manager generates the corresponding certificates:
 ```rust,ignore
-let mut certs = DGSP::gen_cert(&skm.msk, id, &cid, &wots_pks, &plm, &skm.spx_sk).unwrap();
+let mut certs = DGSP::gen_cert(&skm, id, &cid, &wots_pks, &plm).unwrap();
 ```
 
 User can check if given certificates are correct or not:
@@ -285,8 +236,8 @@ DGSP::check_cert(id, &cid, &wots_pks, &certs, &pkm).unwrap();
 
 User signs a message:
 ```rust,ignore
-let message = b"Hello, DGSP!".as_bytes();
-let signature = DGSP::sign(message, &seed_u, id, &cid, wots_rands.pop.unwrap(), certs.pop.unwrap());
+let message = b"Hello, DGSP!";
+let signature = DGSP::sign(message, &seed_u, id, &cid, wots_rands.pop().unwrap(), certs.pop().unwrap());
 ```
 
 ### Verifying
@@ -314,7 +265,7 @@ DGSP::judge(&signature, message, id, &proof).unwrap();
 
 Revoke a user and their associated certificates:
 ```rust,ignore
-DGSP::revoke(&skm.msk, &plm, &[id], &revoked_list).unwrap()
+DGSP::revoke(&skm.msk.aes_key, &plm, &[id], &revoked_list).unwrap();
 ```
 
 To learn more, refer to the `examples/simple.rs` for additional information. One can run the `simple.rs` example for a specific sphincs feature via:

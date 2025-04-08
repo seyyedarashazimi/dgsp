@@ -1,5 +1,4 @@
-use dgsp::dgsp::DGSP;
-use dgsp::{PLMInterface, RevokedListInterface};
+use dgsp::{PLMInterface, RevokedListInterface, DGSP};
 
 #[cfg(feature = "in-memory")]
 use dgsp::{InMemoryPLM, InMemoryRevokedList};
@@ -30,7 +29,7 @@ fn simple_dgsp_in_memory() {
 
     // Now a user chooses a username and requests to join DGSP scheme.
     let username = "DGSP User 1";
-    let (id, cid) = DGSP::join(&skm.msk, username, &plm).unwrap();
+    let (id, cid) = DGSP::join(&skm.msk.hash_secret, username, &plm).unwrap();
     println!(
         "User with username:{:?} joined DGSP with id:{}.",
         username, id
@@ -44,7 +43,7 @@ fn simple_dgsp_in_memory() {
     let (wots_pks, mut wots_rands) = DGSP::csr(&seed_u, 2);
 
     // The user then requests a batch of certificates for the 2 WOTS+ public keys created.
-    let mut certs = DGSP::gen_cert(&skm.msk, &skm.spx_sk, id, &cid, &wots_pks, &plm).unwrap();
+    let mut certs = DGSP::gen_cert(&skm, id, &cid, &wots_pks, &plm).unwrap();
     println!(
         "Created {} new certificates for {:?}, requested by the user.",
         certs.len(),
@@ -85,12 +84,15 @@ fn simple_dgsp_in_memory() {
 
     // The user then wants to sign again.
     let cert = certs.pop();
-    println!("Remaining certificates for {:?}: {:?}.", username, cert);
+    println!(
+        "Remaining certificates for {:?} after signing 2 times: {:?}.",
+        username, cert
+    );
     // Oh, no! No certificates remained for the user.
 
     // User then asks for a few more certificates from the DGSP manager.
     let (wots_pks, mut wots_rands) = DGSP::csr(&seed_u, 5);
-    let mut certs = DGSP::gen_cert(&skm.msk, &skm.spx_sk, id, &cid, &wots_pks, &plm).unwrap();
+    let mut certs = DGSP::gen_cert(&skm, id, &cid, &wots_pks, &plm).unwrap();
     println!(
         "Created {} new certificates for {:?}, requested by the user.",
         certs.len(),
@@ -118,7 +120,7 @@ fn simple_dgsp_in_memory() {
 
     // Let's make judge manager by making sure manager has opened the signature to correct id
     println!(
-        "Manager opened signature to user id:{}, judge manager open behavior: {:?}.",
+        "Manager opened signature to user id:{}, judging manager's opening behavior: {:?}.",
         id,
         DGSP::judge(&sig3, msg3, id, &proof)
     );
@@ -126,7 +128,7 @@ fn simple_dgsp_in_memory() {
     // After a while, user membership in the group expires
     // and as so, manager decides to revoke its membership
     // and the corresponding generated signatures and certificates
-    DGSP::revoke(&skm.msk, &plm, &[id], &revoked_list).unwrap();
+    DGSP::revoke(&skm.msk.aes_key, &plm, &[id], &revoked_list).unwrap();
     println!("User {:?} is revoked from now on.", username);
 
     // After that, the user's previous signatures will no longer be verified.
@@ -183,7 +185,7 @@ fn simple_dgsp_in_disk() {
 
     // Now a user chooses a username and requests to join DGSP scheme.
     let username = "DGSP User 1";
-    let (id, cid) = DGSP::join(&skm.msk, username, &plm).unwrap();
+    let (id, cid) = DGSP::join(&skm.msk.hash_secret, username, &plm).unwrap();
     // If the above line throws an Err(Error::UsernameAlreadyExists("<USERNAME>")) error, it means
     // you have run this code previously and there already exists a user with the given <USERNAME>.
     // So you can either remove the created database (default name is 'simple_db'), or choose
@@ -202,7 +204,7 @@ fn simple_dgsp_in_disk() {
     let (wots_pks, mut wots_rands) = DGSP::csr(&seed_u, 2);
 
     // The user then requests a batch of certificates for the 2 WOTS+ public keys created.
-    let mut certs = DGSP::gen_cert(&skm.msk, &skm.spx_sk, id, &cid, &wots_pks, &plm).unwrap();
+    let mut certs = DGSP::gen_cert(&skm, id, &cid, &wots_pks, &plm).unwrap();
     println!(
         "Created {} new certificates for {:?}, requested by the user.",
         certs.len(),
@@ -243,12 +245,15 @@ fn simple_dgsp_in_disk() {
 
     // The user then wants to sign again.
     let cert = certs.pop();
-    println!("Remaining certificates for {:?}: {:?}.", username, cert);
+    println!(
+        "Remaining certificates for {:?} after signing 2 times: {:?}.",
+        username, cert
+    );
     // Oh, no! No certificates remained for the user.
 
     // User then asks for a few more certificates from the DGSP manager.
     let (wots_pks, mut wots_rands) = DGSP::csr(&seed_u, 5);
-    let mut certs = DGSP::gen_cert(&skm.msk, &skm.spx_sk, id, &cid, &wots_pks, &plm).unwrap();
+    let mut certs = DGSP::gen_cert(&skm, id, &cid, &wots_pks, &plm).unwrap();
     println!(
         "Created {} new certificates for {:?}, requested by the user.",
         certs.len(),
@@ -276,7 +281,7 @@ fn simple_dgsp_in_disk() {
 
     // Let's make judge manager by making sure manager has opened the signature to correct id
     println!(
-        "Manager opened signature to user id:{}, judge manager open behavior: {:?}.",
+        "Manager opened signature to user id:{}, judging manager's opening behavior: {:?}.",
         id,
         DGSP::judge(&sig3, msg3, id, &proof)
     );
@@ -284,7 +289,7 @@ fn simple_dgsp_in_disk() {
     // After a while, user membership in the group expires
     // and as so, manager decides to revoke its membership
     // and the corresponding generated signatures and certificates
-    DGSP::revoke(&skm.msk, &plm, &[id], &revoked_list).unwrap();
+    DGSP::revoke(&skm.msk.aes_key, &plm, &[id], &revoked_list).unwrap();
     println!("User {:?} is revoked from now on.", username);
 
     // After that, the user's previous signatures will no longer be verified.
