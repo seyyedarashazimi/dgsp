@@ -130,18 +130,18 @@ All sizes are in Bytes.
 ```markdown
 | SPHINCS+ feature   | Public Key | Secret Key | Signature |
 |--------------------|------------|------------|-----------|
-| sphincs_sha2_128f  |     32     |     80     |   17704   |
-| sphincs_sha2_128s  |     32     |     80     |    8472   |
-| sphincs_sha2_192f  |     48     |    120     |   36960   |
-| sphincs_sha2_192s  |     48     |    120     |   17520   |
-| sphincs_sha2_256f  |     64     |    160     |   52088   |
-| sphincs_sha2_256s  |     64     |    160     |   32024   |
-| sphincs_shake_128f |     32     |     80     |   17704   |
-| sphincs_shake_128s |     32     |     80     |    8472   |
-| sphincs_shake_192f |     48     |    120     |   36960   |
-| sphincs_shake_192s |     48     |    120     |   17520   |
-| sphincs_shake_256f |     64     |    160     |   52088   |
-| sphincs_shake_256s |     64     |    160     |   32024   |
+| sphincs_sha2_128f  |     32     |     96     |   17704   |
+| sphincs_sha2_128s  |     32     |     96     |    8472   |
+| sphincs_sha2_192f  |     48     |    144     |   36960   |
+| sphincs_sha2_192s  |     48     |    144     |   17520   |
+| sphincs_sha2_256f  |     64     |    192     |   52088   |
+| sphincs_sha2_256s  |     64     |    192     |   32024   |
+| sphincs_shake_128f |     32     |     96     |   17704   |
+| sphincs_shake_128s |     32     |     96     |    8472   |
+| sphincs_shake_192f |     48     |    144     |   36960   |
+| sphincs_shake_192s |     48     |    144     |   17520   |
+| sphincs_shake_256f |     64     |    192     |   52088   |
+| sphincs_shake_256s |     64     |    192     |   32024   |
 ```
 
 ---

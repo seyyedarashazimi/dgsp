@@ -26,7 +26,7 @@ pub const DGSP_BYTES: usize =
 pub const DGSP_PK_BYTES: usize = SPX_PK_BYTES;
 
 /// DGSP secret-key byte size.
-pub const DGSP_SK_BYTES: usize = DGSP_N + SPX_SK_BYTES;
+pub const DGSP_SK_BYTES: usize = 2 * DGSP_N + SPX_SK_BYTES;
 
 /// DGSP user byte size.
 pub const DGSP_USER_BYTES: usize = 8;
