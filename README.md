@@ -19,6 +19,12 @@ and real-world applications requiring long-term security.
 
 ---
 
+## DGSP paper
+
+To obtain more info about DGSP group signature scheme, please refer to the paper at: https://eprint.iacr.org/2025/760
+
+---
+
 ## Features
 
 ### Core Functionalities
