@@ -185,11 +185,18 @@ fn simple_dgsp_in_disk() {
 
     // Now a user chooses a username and requests to join DGSP scheme.
     let username = "DGSP User 1";
-    let (id, cid) = DGSP::join(&skm.msk.hash_secret, username, &plm).unwrap();
+    let (id, cid) = DGSP::join(&skm.msk.hash_secret, username, &plm).expect(
+        "Selected username already exists in database. You can do one of the following: \n\
+        - run the code with a new username; or \n\
+        - choose a new path for your new database; or \n\
+        - (easiest) remove the current database directory (default name is <simple_db>).\n",
+    );
     // If the above line throws an Err(Error::UsernameAlreadyExists("<USERNAME>")) error, it means
     // you have run this code previously and there already exists a user with the given <USERNAME>.
-    // So you can either remove the created database (default name is 'simple_db'), or choose
-    // another path for database, or choose a new username.
+    // So you can either:
+    // - remove the created database (default name is 'simple_db'), or
+    // - choose another path for database, or
+    // - choose a new username.
 
     println!(
         "User with username:{:?} joined DGSP with id:{}.",

@@ -6,8 +6,7 @@
 //!
 //! To incorporates `WOTS-T` safety principles to ensure the security of derived keys and
 //! signatures against multi-target, a proper [`Adrs`] is set per each keypair and generated
-//! signature. The `Adrs` contains a 64-bit random value, which alongside the random seeds, makes
-//! the scheme secure.
+//! signature. The `Adrs` alongside the random seeds, makes the scheme secure.
 //!
 //! ## W-OTS+ and DGSP
 //!
@@ -16,7 +15,7 @@
 //! The associated parameter sets and hasher variants are selected at compile time using feature
 //! flags.
 //!
-//! ## Important
+//! ## Important Note
 //!
 //! This W-OTS+ implementation is provided to be used in a bigger signature scheme like DGSP and
 //! optimized for that use. Therefore, it is not suggested to be used as a standalone signature
@@ -32,14 +31,9 @@ use crate::wots_plus::adrs::AdrsType::{WotsHash, WotsPk, WotsPrf};
 
 pub mod adrs;
 
-/// Length of random bytes used for address derivation in W-OTS+ operations.
-pub const WTS_ADRS_RAND_BYTES: usize = 8;
-
 /// Encapsulates the W-OTS+ operations and maintains state for the hasher and address randomness.
-/// It
 #[derive(Clone, Debug)]
 pub struct WotsPlus {
-    pub adrs_rand: [u8; WTS_ADRS_RAND_BYTES],
     hasher: DGSPHasher,
 }
 
@@ -57,37 +51,9 @@ impl WotsPlus {
     /// # Returns
     ///
     /// A new instance of `WotsPlus` initialized with the given public seed.
-    pub fn new(pub_seed: &[u8; SPX_N]) -> Self {
+    pub fn new(pub_seed: &[u8]) -> Self {
         let hasher = DGSPHasher::new(pub_seed);
-        Self {
-            adrs_rand: [0_u8; WTS_ADRS_RAND_BYTES],
-            hasher,
-        }
-    }
-
-    /// Creates a new `WotsPlus` instance with the specified address randomness and public seed.
-    ///
-    /// This constructor allows initializing the WOTS+ state with a specific address randomness
-    /// (`adrs_rand`). This is useful for deterministic scenarios where reproducibility is required.
-    ///
-    /// # Arguments
-    ///
-    /// * `adrs_rand` - A byte slice representing the random bytes used for address derivation.
-    /// * `pub_seed` - A `SPX_N`-byte public seed used for hashing operations.
-    ///
-    /// # Returns
-    ///
-    /// A new instance of `WotsPlus` initialized with the given randomness and public seed.
-    ///
-    /// # Panics
-    ///
-    /// This function panics if the length of `adrs_rand` is not exactly [`WTS_ADRS_RAND_BYTES`] bytes.
-    pub fn new_from_rand(adrs_rand: &[u8], pub_seed: &[u8; SPX_N]) -> Self {
-        let hasher = DGSPHasher::new(pub_seed);
-        Self {
-            adrs_rand: adrs_rand.try_into().unwrap(),
-            hasher,
-        }
+        Self { hasher }
     }
 
     /// Generates a WOTS+ keypair.
@@ -106,7 +72,7 @@ impl WotsPlus {
     /// * `[u8; SPX_N]` - The generated compressed public key.
     /// * `[u8; SPX_WOTS_BYTES]` - The corresponding secret key.
     pub fn keygen(&self, sk_seed: &[u8]) -> ([u8; SPX_N], [u8; SPX_WOTS_BYTES]) {
-        let mut adrs = Adrs::new_full_from_rand(WotsHash, &self.adrs_rand);
+        let mut adrs = Adrs::from(WotsHash);
         self.gen_pk_sk(sk_seed, 0, &mut adrs)
     }
 
@@ -126,7 +92,7 @@ impl WotsPlus {
     pub fn sign(&self, message: &[u8], sk: &[u8]) -> [u8; SPX_WOTS_BYTES] {
         let mut hm = [0u8; SPX_N];
         self.hash_m(&mut hm, message);
-        let mut adrs = Adrs::new_full_from_rand(WotsHash, &self.adrs_rand);
+        let mut adrs = Adrs::from(WotsHash);
         self.gen_sig(sk, 0, &mut adrs, &hm)
     }
 
@@ -146,7 +112,7 @@ impl WotsPlus {
     pub fn sign_from_sk_seed(&self, message: &[u8], sk_seed: &[u8; SPX_N]) -> [u8; SPX_WOTS_BYTES] {
         let mut hm = [0u8; SPX_N];
         self.hash_m(&mut hm, message);
-        let mut adrs = Adrs::new_full_from_rand(WotsPrf, &self.adrs_rand);
+        let mut adrs = Adrs::from(WotsPrf);
         self.gen_sig_from_sk_seed(sk_seed, 0, &mut adrs, &hm)
     }
 
@@ -157,7 +123,7 @@ impl WotsPlus {
     ) -> ([u8; SPX_N], [u8; SPX_WOTS_BYTES]) {
         let mut hm = [0u8; SPX_N];
         self.hash_m(&mut hm, message);
-        let mut adrs = Adrs::new_full_from_rand(WotsPrf, &self.adrs_rand);
+        let mut adrs = Adrs::from(WotsPrf);
         self.gen_pk_and_sig_from_sk_seed(sk_seed, 0, &mut adrs, &hm)
     }
 
@@ -181,7 +147,7 @@ impl WotsPlus {
     pub fn verify(&self, signature: &[u8], message: &[u8], pk: &[u8]) -> bool {
         let mut hm = [0u8; SPX_N];
         self.hash_m(&mut hm, message);
-        let mut adrs = Adrs::new_full_from_rand(WotsHash, &self.adrs_rand);
+        let mut adrs = Adrs::from(WotsHash);
         let calculated_pk = self.wots_pk_from_sig(signature, &hm, 0, &mut adrs);
         calculated_pk == pk
     }
@@ -202,7 +168,7 @@ impl WotsPlus {
     pub fn pk_from_sig(&self, signature: &[u8], message: &[u8]) -> [u8; SPX_N] {
         let mut hm = [0u8; SPX_N];
         self.hash_m(&mut hm, message);
-        let mut adrs = Adrs::new_full_from_rand(WotsHash, &self.adrs_rand);
+        let mut adrs = Adrs::from(WotsHash);
         self.wots_pk_from_sig(signature, &hm, 0, &mut adrs)
     }
 
@@ -540,7 +506,7 @@ mod tests {
         fake_signature[0] ^= 1;
         assert!(!wp.verify(&fake_signature, &message, &pk));
 
-        let wp_same = WotsPlus::new_from_rand(&wp.adrs_rand, &pub_seed);
+        let wp_same = WotsPlus::new(&pub_seed);
         let (pk_same, _) = wp_same.keygen(&sk_seed);
         assert_eq!(pk, pk_same);
 

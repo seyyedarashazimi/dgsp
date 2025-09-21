@@ -4,7 +4,7 @@
 //! (with public and secret keys), multiple users (each with their own seed to
 //! generate secret keys, and their credentials for requesting certificates),
 //! and verifiers who verify group signatures. The bit-level security of DGSP,
-//! i.e. λ or [`DGSP_LAMBDA`], is either 128, 192, or 256 and determined by the
+//! i.e. λ or [`DGSP_N`], is either 128, 192, or 256 and determined by the
 //! choice of the underlying SPHINCS+ feature and is set to λ=256 by default.
 //!
 //! ## Cryptographic Primitives
@@ -47,8 +47,8 @@
 //!     Each user in DGSP can:
 //!     (i) obtain a pair of (id, cid) by providing a unique username,
 //!     (ii) request a batch of certificates and check their validity,
-//!     (iii) sign a message using a new WOTS+ public key from a pair of random
-//!     numbers as well as the corresponding certificate.
+//!     (iii) sign a message using a new WOTS+ public key from a random
+//!     seed as well as the corresponding certificate.
 //!
 //! 3. Verifier: A verifier in DGSP scheme uses publicly-known values to verify
 //!     correctness of the scheme. The public knowledge includes the manager's
@@ -171,7 +171,7 @@ use crate::hash::DGSPHasher;
 use crate::params::{DGSP_N, DGSP_USER_BYTES, DGSP_ZETA_BYTES};
 use crate::sphincs_plus::*;
 use crate::utils::{array_struct, bytes_to_u64, u64_to_bytes};
-use crate::wots_plus::{WotsPlus, WTS_ADRS_RAND_BYTES};
+use crate::wots_plus::WotsPlus;
 use crate::{Error, Result, VerificationError};
 use aes::cipher::generic_array::GenericArray;
 use aes::cipher::{BlockDecrypt, BlockEncrypt};
@@ -185,15 +185,9 @@ use serde::{Deserialize, Serialize};
 #[cfg(feature = "serialization")]
 use serde_big_array::BigArray;
 
-/// Holds the randomness used by the WOTS+ scheme within DGSP.
-#[cfg_attr(feature = "serialization", derive(Serialize, Deserialize))]
-#[derive(Clone, Zeroize, Debug, PartialEq)]
-pub struct DGSPWotsRand {
-    /// The signing seed (i.e. public key seed) for WOTS+
-    wots_sgn_seed: [u8; DGSP_N],
-    /// The randomness needed for address derivation
-    wots_adrs_rand: [u8; WTS_ADRS_RAND_BYTES],
-}
+// Holds the randomness used by the WOTS+ scheme within DGSP, i.e. rho.
+// The internal array is the signing seed (i.e. public key seed) for WOTS+.
+array_struct!(DGSPWotsRand, DGSP_N);
 
 impl Default for DGSPWotsRand {
     fn default() -> Self {
@@ -202,16 +196,11 @@ impl Default for DGSPWotsRand {
 }
 
 impl DGSPWotsRand {
-    /// Creates a new instance of `DGSPWotsRand` with cryptographically random seeds.
+    /// Creates a new instance of `DGSPWotsRand` with cryptographically random seed.
     pub fn new() -> Self {
-        let mut wots_adrs_rand = [0u8; WTS_ADRS_RAND_BYTES];
         let mut wots_sgn_seed = [0u8; DGSP_N];
-        OsRng.fill_bytes(&mut wots_adrs_rand);
         OsRng.fill_bytes(&mut wots_sgn_seed);
-        Self {
-            wots_adrs_rand,
-            wots_sgn_seed,
-        }
+        Self(wots_sgn_seed)
     }
 }
 
@@ -288,8 +277,7 @@ pub struct DGSPSignature {
     /// The WOTS+ signature.
     #[cfg_attr(feature = "serialization", serde(with = "BigArray"))]
     pub wots_sig: [u8; SPX_WOTS_BYTES],
-    /// The randomness used by WOTS+ (both for the signature seed and the
-    /// address freshness).
+    /// The randomness used by WOTS+ as the sign seed.
     pub wots_rand: DGSPWotsRand,
     /// The one-time certificate created for the WOTS+ public key.
     pub cert: DGSPCert,
@@ -530,8 +518,7 @@ impl DGSP {
         plm.id_exists(id)?;
 
         // Recreate the WOTS+ public key from the signature.
-        let wp =
-            WotsPlus::new_from_rand(&sig.wots_rand.wots_adrs_rand, &sig.wots_rand.wots_sgn_seed);
+        let wp = WotsPlus::new(sig.wots_rand.as_ref());
         let wots_pk = wp.pk_from_sig(&sig.wots_sig, message);
 
         // Calculate pi from msk, the WOTS+ public key. and the user's credential.
@@ -759,8 +746,7 @@ impl DGSP {
             .into_par_iter()
             .map(|_| {
                 let wots_rand = DGSPWotsRand::new();
-                let wp =
-                    WotsPlus::new_from_rand(&wots_rand.wots_adrs_rand, &wots_rand.wots_sgn_seed);
+                let wp = WotsPlus::new(wots_rand.as_ref());
                 let (pk_wots, _) = wp.keygen(seed_user);
                 (pk_wots, wots_rand)
             })
@@ -802,7 +788,7 @@ impl DGSP {
         wots_rand: DGSPWotsRand,
         cert: DGSPCert,
     ) -> DGSPSignature {
-        let wp = WotsPlus::new_from_rand(&wots_rand.wots_adrs_rand, &wots_rand.wots_sgn_seed);
+        let wp = WotsPlus::new(wots_rand.as_ref());
         let (wots_pk, wots_sig) = wp.pk_sign_from_sk_seed(message, seed_user);
 
         let pi = Self::calculate_pi(&wots_pk, cid);
@@ -845,8 +831,7 @@ impl DGSP {
         if revoked_list.contains(&sig.cert.zeta)? {
             return Err(VerificationError::RevokedSignature)?;
         }
-        let wp =
-            WotsPlus::new_from_rand(&sig.wots_rand.wots_adrs_rand, &sig.wots_rand.wots_sgn_seed);
+        let wp = WotsPlus::new(sig.wots_rand.as_ref());
         let wots_pk = wp.pk_from_sig(&sig.wots_sig, message);
         let spx_msg = Self::prepare_spx_msg(&wots_pk, &sig.cert.zeta, &sig.tau);
         SphincsPlus::verify(&sig.cert.spx_sig, &spx_msg, &pk.spx_pk)
@@ -912,8 +897,7 @@ impl DGSP {
     /// `Ok(())` indicating success if the judge check passes, otherwise
     /// returns `Err(dgsp::Error::WrongIDOpened(id))`.
     pub fn judge(sig: &DGSPSignature, message: &[u8], id: u64, pi: &[u8; DGSP_N]) -> Result<()> {
-        let wp =
-            WotsPlus::new_from_rand(&sig.wots_rand.wots_adrs_rand, &sig.wots_rand.wots_sgn_seed);
+        let wp = WotsPlus::new(sig.wots_rand.as_ref());
         let wots_pk = wp.pk_from_sig(&sig.wots_sig, message);
         if sig.tau != Self::calculate_tau(&wots_pk, pi, id) {
             return Err(Error::WrongIDOpened(id));
@@ -1445,52 +1429,6 @@ mod tests {
         test_dgsp_sign_with_wrong_cid(plm, revoked_list);
     }
 
-    fn test_dgsp_sign_with_wrong_wots_rand_adrs<P: PLMInterface, R: RevokedListInterface>(
-        plm: P,
-        revoked_list: R,
-    ) {
-        let (pkm, skm) = DGSP::keygen_manager().unwrap();
-
-        let seed_u0 = DGSP::keygen_user();
-        let username_u0 = "dgsp user 0";
-        let (id_u0, cid_u0) = DGSP::join(&skm.msk.hash_secret, username_u0, &plm).unwrap();
-
-        const B: usize = 1;
-        let (wots_pks, mut wots_rands) = DGSP::csr(&seed_u0, B);
-        let mut certs = DGSP::gen_cert(&skm, id_u0, &cid_u0, &wots_pks, &plm).unwrap();
-
-        let m = random_message();
-        let wr = wots_rands.pop().unwrap();
-        let c = certs.pop().unwrap();
-
-        // Sign with incorrect WOTS+ ADRS random array :
-        let wrong_wr_adrs = DGSPWotsRand {
-            wots_adrs_rand: {
-                let mut fake_wots_adrs_rand = wr.wots_adrs_rand;
-                fake_wots_adrs_rand[0] ^= 1;
-                fake_wots_adrs_rand
-            },
-            ..wr
-        };
-        let sig_wrong_wr_adrs = DGSP::sign(&m, &seed_u0, id_u0, &cid_u0, wrong_wr_adrs, c);
-        assert!(matches!(
-            DGSP::verify(&m, &sig_wrong_wr_adrs, &revoked_list, &pkm),
-            Err(Error::VerificationFailed(SphincsPlusVerificationFailed(_)))
-        ));
-    }
-    #[test]
-    #[cfg(feature = "in-disk")]
-    fn test_dgsp_sign_with_wrong_wots_rand_adrs_in_disk() {
-        let (plm, revoked_list) = in_disk().unwrap();
-        test_dgsp_sign_with_wrong_wots_rand_adrs(plm, revoked_list);
-    }
-    #[test]
-    #[cfg(feature = "in-memory")]
-    fn test_dgsp_sign_with_wrong_wots_rand_adrs_in_memory() {
-        let (plm, revoked_list) = in_memory().unwrap();
-        test_dgsp_sign_with_wrong_wots_rand_adrs(plm, revoked_list);
-    }
-
     fn test_dgsp_sign_with_wrong_wots_sgn_seed<P: PLMInterface, R: RevokedListInterface>(
         plm: P,
         revoked_list: R,
@@ -1510,14 +1448,11 @@ mod tests {
         let c = certs.pop().unwrap();
 
         // Sign with incorrect WOTS+ SGN seed :
-        let wrong_wr_seed = DGSPWotsRand {
-            wots_sgn_seed: {
-                let mut fake_wots_sgn_seed = wr.wots_sgn_seed;
-                fake_wots_sgn_seed[0] ^= 1;
-                fake_wots_sgn_seed
-            },
-            ..wr
-        };
+        let wrong_wr_seed = DGSPWotsRand({
+            let mut fake_wots_sgn_seed = wr.0;
+            fake_wots_sgn_seed[0] ^= 1;
+            fake_wots_sgn_seed
+        });
         let sig_wrong_wr_seed = DGSP::sign(&m, &seed_u0, id_u0, &cid_u0, wrong_wr_seed, c);
         assert!(matches!(
             DGSP::verify(&m, &sig_wrong_wr_seed, &revoked_list, &pkm),
@@ -1815,55 +1750,6 @@ mod tests {
         test_dgsp_verify_fake_spx_sig(plm, revoked_list);
     }
 
-    fn test_dgsp_verify_fake_wots_adrs_rand<P: PLMInterface, R: RevokedListInterface>(
-        plm: P,
-        revoked_list: R,
-    ) {
-        let (pkm, skm) = DGSP::keygen_manager().unwrap();
-
-        let seed_u0 = DGSP::keygen_user();
-        let username_u0 = "dgsp user 0";
-        let (id_u0, cid_u0) = DGSP::join(&skm.msk.hash_secret, username_u0, &plm).unwrap();
-
-        const B: usize = 1;
-        let (wots_pks, mut wots_rands) = DGSP::csr(&seed_u0, B);
-        let mut certs = DGSP::gen_cert(&skm, id_u0, &cid_u0, &wots_pks, &plm).unwrap();
-
-        let m = random_message();
-        let wr = wots_rands.pop().unwrap();
-        let c = certs.pop().unwrap();
-        let sig = DGSP::sign(&m, &seed_u0, id_u0, &cid_u0, wr, c);
-
-        // Try to forge signature with fake WOTS+ ADRS random array
-        let sig_fake_wots_adrs_rand = DGSPSignature {
-            wots_rand: DGSPWotsRand {
-                wots_adrs_rand: {
-                    let mut fake_wots_adrs_rand = sig.wots_rand.wots_adrs_rand;
-                    fake_wots_adrs_rand[0] ^= 1;
-                    fake_wots_adrs_rand
-                },
-                ..sig.wots_rand
-            },
-            ..sig
-        };
-        assert!(matches!(
-            DGSP::verify(&m, &sig_fake_wots_adrs_rand, &revoked_list, &pkm),
-            Err(Error::VerificationFailed(SphincsPlusVerificationFailed(_)))
-        ));
-    }
-    #[test]
-    #[cfg(feature = "in-disk")]
-    fn test_dgsp_verify_fake_wots_adrs_rand_in_disk() {
-        let (plm, revoked_list) = in_disk().unwrap();
-        test_dgsp_verify_fake_wots_adrs_rand(plm, revoked_list);
-    }
-    #[test]
-    #[cfg(feature = "in-memory")]
-    fn test_dgsp_verify_fake_wots_adrs_rand_in_memory() {
-        let (plm, revoked_list) = in_memory().unwrap();
-        test_dgsp_verify_fake_wots_adrs_rand(plm, revoked_list);
-    }
-
     fn test_dgsp_verify_fake_wots_sgn_seed<P: PLMInterface, R: RevokedListInterface>(
         plm: P,
         revoked_list: R,
@@ -1885,14 +1771,11 @@ mod tests {
 
         // Try to forge signature with fake WOTS+ SGN seed
         let sig_fake_wots_sgn_seed = DGSPSignature {
-            wots_rand: DGSPWotsRand {
-                wots_sgn_seed: {
-                    let mut fake_wots_sgn_seed = sig.wots_rand.wots_sgn_seed;
-                    fake_wots_sgn_seed[0] ^= 1;
-                    fake_wots_sgn_seed
-                },
-                ..sig.wots_rand
-            },
+            wots_rand: DGSPWotsRand({
+                let mut fake_wots_sgn_seed = sig.wots_rand.0;
+                fake_wots_sgn_seed[0] ^= 1;
+                fake_wots_sgn_seed
+            }),
             ..sig
         };
         assert!(matches!(

@@ -1,10 +1,10 @@
 use crate::sphincs_plus::{SPX_BYTES, SPX_N, SPX_PK_BYTES, SPX_SK_BYTES, SPX_WOTS_BYTES};
-use crate::wots_plus::WTS_ADRS_RAND_BYTES;
 
-/// Security level of DGSP in byte-level.
+/// Security level of DGSP in byte-level. It is set when the SPHINCS+ type is decided
+/// which is either 16, 24, or 32.
 pub const DGSP_N: usize = SPX_N;
 
-/// Security level of DGSP in bit-level.
+/// Security level of DGSP in bit-level, either 128, 192, or 256.
 pub const DGSP_LAMBDA: usize = DGSP_N >> 3;
 
 /// Layer address set in ADRS. It is chosen to be unique from the layer addresses present
@@ -16,7 +16,7 @@ pub const WOTSPLUS_ADRS_LAYER: u32 = 73;
 pub const DGSP_ZETA_BYTES: usize = 16;
 
 /// DGSP WOTS+ rand byte size.
-pub const DGSP_WOTS_RAND_BYTES: usize = WTS_ADRS_RAND_BYTES + DGSP_N;
+pub const DGSP_WOTS_RAND_BYTES: usize = DGSP_N;
 
 /// DGSP signature byte size.
 pub const DGSP_BYTES: usize =

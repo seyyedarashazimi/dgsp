@@ -9,7 +9,7 @@ pub(crate) struct DGSPHasher {
 }
 
 impl DGSPHasher {
-    pub(crate) fn new(pub_seed: &[u8; DGSP_N]) -> Self {
+    pub(crate) fn new(pub_seed: &[u8]) -> Self {
         // block-pad and initialize sha256 and sha512 with pub_seed
         let mut block256 = [0_u8; SPX_SHA256_BLOCK_BYTES];
         block256[..DGSP_N].copy_from_slice(pub_seed.as_ref());

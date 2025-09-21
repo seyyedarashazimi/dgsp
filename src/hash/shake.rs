@@ -11,7 +11,7 @@ pub(crate) struct DGSPHasher {
 }
 
 impl DGSPHasher {
-    pub(crate) fn new(pub_seed: &[u8; DGSP_N]) -> Self {
+    pub(crate) fn new(pub_seed: &[u8]) -> Self {
         Self {
             pub_seed: pub_seed.as_ref().try_into().unwrap(),
         }
