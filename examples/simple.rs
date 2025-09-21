@@ -54,14 +54,14 @@ fn simple_dgsp_in_memory() {
     println!(
         "The status of checking {} certificates: {:?}.",
         certs.len(),
-        DGSP::check_cert(id, &cid, &wots_pks, &certs, &pkm)
+        DGSP::check_cert(id, &wots_pks, &certs, &pkm)
     );
 
     // After receiving certificates, user can sign an arbitrary message.
     let cert = certs.pop().unwrap();
     let wots_rand = wots_rands.pop().unwrap();
     let msg1 = "Hi! I am DGSP User 1. This is my first message!".as_bytes();
-    let sig1 = DGSP::sign(msg1, &seed_u, id, &cid, wots_rand, cert);
+    let sig1 = DGSP::sign(msg1, &seed_u, id, wots_rand, cert);
 
     // Now having the public information, one can verify the user's signature:
     println!(
@@ -75,7 +75,7 @@ fn simple_dgsp_in_memory() {
     let cert = certs.pop().unwrap();
     let wots_rand = wots_rands.pop().unwrap();
     let msg2 = "I am still DGSP User 1 and this is my second message. :)".as_bytes();
-    let sig2 = DGSP::sign(msg2, &seed_u, id, &cid, wots_rand, cert);
+    let sig2 = DGSP::sign(msg2, &seed_u, id, wots_rand, cert);
     println!(
         "Verification status of the second signature of {:?}: {:?}.",
         username,
@@ -103,7 +103,7 @@ fn simple_dgsp_in_memory() {
     let cert = certs.pop().unwrap();
     let wots_rand = wots_rands.pop().unwrap();
     let msg3 = "I am yet again DGSP User 1 and this is my third message. ciao!".as_bytes();
-    let sig3 = DGSP::sign(msg3, &seed_u, id, &cid, wots_rand, cert);
+    let sig3 = DGSP::sign(msg3, &seed_u, id, wots_rand, cert);
     println!(
         "Verification status of the third signature of {:?}: {:?}.",
         username,
@@ -152,7 +152,7 @@ fn simple_dgsp_in_memory() {
     let cert = certs.pop().unwrap();
     let wots_rand = wots_rands.pop().unwrap();
     let msg4 = "This is DGSP User 1 and I am trying to sign even after being revoked!".as_bytes();
-    let sig4 = DGSP::sign(msg4, &seed_u, id, &cid, wots_rand, cert);
+    let sig4 = DGSP::sign(msg4, &seed_u, id, wots_rand, cert);
     println!(
         "Verification status of the new signature signed by {:?} after revocation: {:?}.",
         username,
@@ -215,14 +215,14 @@ fn simple_dgsp_in_disk() {
     println!(
         "The status of checking {} certificates: {:?}.",
         certs.len(),
-        DGSP::check_cert(id, &cid, &wots_pks, &certs, &pkm)
+        DGSP::check_cert(id, &wots_pks, &certs, &pkm)
     );
 
     // After receiving certificates, user can sign an arbitrary message.
     let cert = certs.pop().unwrap();
     let wots_rand = wots_rands.pop().unwrap();
     let msg1 = "Hi! I am DGSP User 1. This is my first message!".as_bytes();
-    let sig1 = DGSP::sign(msg1, &seed_u, id, &cid, wots_rand, cert);
+    let sig1 = DGSP::sign(msg1, &seed_u, id, wots_rand, cert);
 
     // Now having the public information, one can verify the user's signature:
     println!(
@@ -236,7 +236,7 @@ fn simple_dgsp_in_disk() {
     let cert = certs.pop().unwrap();
     let wots_rand = wots_rands.pop().unwrap();
     let msg2 = "I am still DGSP User 1 and this is my second message. :)".as_bytes();
-    let sig2 = DGSP::sign(msg2, &seed_u, id, &cid, wots_rand, cert);
+    let sig2 = DGSP::sign(msg2, &seed_u, id, wots_rand, cert);
     println!(
         "Verification status of the second signature of {:?}: {:?}.",
         username,
@@ -264,7 +264,7 @@ fn simple_dgsp_in_disk() {
     let cert = certs.pop().unwrap();
     let wots_rand = wots_rands.pop().unwrap();
     let msg3 = "I am yet again DGSP User 1 and this is my third message. ciao!".as_bytes();
-    let sig3 = DGSP::sign(msg3, &seed_u, id, &cid, wots_rand, cert);
+    let sig3 = DGSP::sign(msg3, &seed_u, id, wots_rand, cert);
     println!(
         "Verification status of the third signature of {:?}: {:?}.",
         username,
@@ -313,7 +313,7 @@ fn simple_dgsp_in_disk() {
     let cert = certs.pop().unwrap();
     let wots_rand = wots_rands.pop().unwrap();
     let msg4 = "This is DGSP User 1 and I am trying to sign even after being revoked!".as_bytes();
-    let sig4 = DGSP::sign(msg4, &seed_u, id, &cid, wots_rand, cert);
+    let sig4 = DGSP::sign(msg4, &seed_u, id, wots_rand, cert);
     println!(
         "Verification status of the new signature signed by {:?} after revocation: {:?}.",
         username,
