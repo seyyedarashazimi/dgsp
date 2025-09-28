@@ -212,7 +212,7 @@ A user joins the system and obtains their unique ID and cryptographic identifier
 
 ```rust,ignore
 let username = "alice";
-let (id, cid) = DGSP::join(&skm.msk.hash_secret, username, &plm).unwrap();
+let (id, cid_star) = DGSP::join(&skm.msk.hash_secret, username, &plm).unwrap();
 ```
 
 The user also generate a private seed:
@@ -227,23 +227,23 @@ Create a batch of certificate signing request:
 
 ```rust,ignore
 let batch_size = 8;
-let (wots_pks, mut wots_rands) = DGSP::csr(&seed_u, batch_size);
+let (wots_pks, mut wots_seeds) = DGSP::csr(&seed_u, batch_size);
 ```
 
 Manager generates the corresponding certificates:
 ```rust,ignore
-let mut certs = DGSP::gen_cert(&skm, id, &cid, &wots_pks, &plm).unwrap();
+let mut certs = DGSP::gen_cert(&skm, id, &cid_star, &wots_pks, &plm).unwrap();
 ```
 
 User can check if given certificates are correct or not:
 ```rust,ignore
-DGSP::check_cert(id, &cid, &wots_pks, &certs, &pkm).unwrap();
+DGSP::check_cert(id, &wots_pks, &certs, &pkm).unwrap();
 ```
 
 User signs a message:
 ```rust,ignore
 let message = b"Hello, DGSP!";
-let signature = DGSP::sign(message, &seed_u, id, &cid, wots_rands.pop().unwrap(), certs.pop().unwrap());
+let signature = DGSP::sign(message, &seed_u, id, &cid_star, wots_seeds.pop().unwrap(), certs.pop().unwrap());
 ```
 
 ### Verifying

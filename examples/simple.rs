@@ -29,7 +29,7 @@ fn simple_dgsp_in_memory() {
 
     // Now a user chooses a username and requests to join DGSP scheme.
     let username = "DGSP User 1";
-    let (id, cid) = DGSP::join(&skm.msk.hash_secret, username, &plm).unwrap();
+    let (id, cid_star) = DGSP::join(&skm.msk.hash_secret, username, &plm).unwrap();
     println!(
         "User with username:{:?} joined DGSP with id:{}.",
         username, id
@@ -39,11 +39,11 @@ fn simple_dgsp_in_memory() {
     let seed_u = DGSP::keygen_user();
 
     // Next, user creates a batch of 2 certificate signing requests,
-    // including 2 pairs of WOTS+ public-key and corresponding randomness.
-    let (wots_pks, mut wots_rands) = DGSP::csr(&seed_u, 2);
+    // including 2 pairs of WOTS+ public-key and corresponding randomness seeds.
+    let (wots_pks, mut wots_seeds) = DGSP::csr(&seed_u, 2);
 
     // The user then requests a batch of certificates for the 2 WOTS+ public keys created.
-    let mut certs = DGSP::gen_cert(&skm, id, &cid, &wots_pks, &plm).unwrap();
+    let mut certs = DGSP::gen_cert(&skm, id, &cid_star, &wots_pks, &plm).unwrap();
     println!(
         "Created {} new certificates for {:?}, requested by the user.",
         certs.len(),
@@ -54,14 +54,14 @@ fn simple_dgsp_in_memory() {
     println!(
         "The status of checking {} certificates: {:?}.",
         certs.len(),
-        DGSP::check_cert(id, &cid, &wots_pks, &certs, &pkm)
+        DGSP::check_cert(id, &wots_pks, &certs, &pkm)
     );
 
     // After receiving certificates, user can sign an arbitrary message.
     let cert = certs.pop().unwrap();
-    let wots_rand = wots_rands.pop().unwrap();
+    let wots_seed = wots_seeds.pop().unwrap();
     let msg1 = "Hi! I am DGSP User 1. This is my first message!".as_bytes();
-    let sig1 = DGSP::sign(msg1, &seed_u, id, &cid, wots_rand, cert);
+    let sig1 = DGSP::sign(msg1, &seed_u, id, wots_seed, cert);
 
     // Now having the public information, one can verify the user's signature:
     println!(
@@ -73,9 +73,9 @@ fn simple_dgsp_in_memory() {
 
     // Now user creates another signature:
     let cert = certs.pop().unwrap();
-    let wots_rand = wots_rands.pop().unwrap();
+    let wots_seed = wots_seeds.pop().unwrap();
     let msg2 = "I am still DGSP User 1 and this is my second message. :)".as_bytes();
-    let sig2 = DGSP::sign(msg2, &seed_u, id, &cid, wots_rand, cert);
+    let sig2 = DGSP::sign(msg2, &seed_u, id, wots_seed, cert);
     println!(
         "Verification status of the second signature of {:?}: {:?}.",
         username,
@@ -91,8 +91,8 @@ fn simple_dgsp_in_memory() {
     // Oh, no! No certificates remained for the user.
 
     // User then asks for a few more certificates from the DGSP manager.
-    let (wots_pks, mut wots_rands) = DGSP::csr(&seed_u, 5);
-    let mut certs = DGSP::gen_cert(&skm, id, &cid, &wots_pks, &plm).unwrap();
+    let (wots_pks, mut wots_seeds) = DGSP::csr(&seed_u, 5);
+    let mut certs = DGSP::gen_cert(&skm, id, &cid_star, &wots_pks, &plm).unwrap();
     println!(
         "Created {} new certificates for {:?}, requested by the user.",
         certs.len(),
@@ -101,9 +101,9 @@ fn simple_dgsp_in_memory() {
 
     // Now user can continue signing messages.
     let cert = certs.pop().unwrap();
-    let wots_rand = wots_rands.pop().unwrap();
+    let wots_seed = wots_seeds.pop().unwrap();
     let msg3 = "I am yet again DGSP User 1 and this is my third message. ciao!".as_bytes();
-    let sig3 = DGSP::sign(msg3, &seed_u, id, &cid, wots_rand, cert);
+    let sig3 = DGSP::sign(msg3, &seed_u, id, wots_seed, cert);
     println!(
         "Verification status of the third signature of {:?}: {:?}.",
         username,
@@ -150,9 +150,9 @@ fn simple_dgsp_in_memory() {
 
     // And user can no longer create valid signatures using the remaining certificates:
     let cert = certs.pop().unwrap();
-    let wots_rand = wots_rands.pop().unwrap();
+    let wots_seed = wots_seeds.pop().unwrap();
     let msg4 = "This is DGSP User 1 and I am trying to sign even after being revoked!".as_bytes();
-    let sig4 = DGSP::sign(msg4, &seed_u, id, &cid, wots_rand, cert);
+    let sig4 = DGSP::sign(msg4, &seed_u, id, wots_seed, cert);
     println!(
         "Verification status of the new signature signed by {:?} after revocation: {:?}.",
         username,
@@ -185,7 +185,7 @@ fn simple_dgsp_in_disk() {
 
     // Now a user chooses a username and requests to join DGSP scheme.
     let username = "DGSP User 1";
-    let (id, cid) = DGSP::join(&skm.msk.hash_secret, username, &plm).expect(
+    let (id, cid_star) = DGSP::join(&skm.msk.hash_secret, username, &plm).expect(
         "Selected username already exists in database. You can do one of the following: \n\
         - run the code with a new username; or \n\
         - choose a new path for your new database; or \n\
@@ -207,11 +207,11 @@ fn simple_dgsp_in_disk() {
     let seed_u = DGSP::keygen_user();
 
     // Next, user creates a batch of 2 certificate signing requests,
-    // including 2 pairs of WOTS+ public-key and corresponding randomness.
-    let (wots_pks, mut wots_rands) = DGSP::csr(&seed_u, 2);
+    // including 2 pairs of WOTS+ public-key and corresponding randomness seeds.
+    let (wots_pks, mut wots_seeds) = DGSP::csr(&seed_u, 2);
 
     // The user then requests a batch of certificates for the 2 WOTS+ public keys created.
-    let mut certs = DGSP::gen_cert(&skm, id, &cid, &wots_pks, &plm).unwrap();
+    let mut certs = DGSP::gen_cert(&skm, id, &cid_star, &wots_pks, &plm).unwrap();
     println!(
         "Created {} new certificates for {:?}, requested by the user.",
         certs.len(),
@@ -222,14 +222,14 @@ fn simple_dgsp_in_disk() {
     println!(
         "The status of checking {} certificates: {:?}.",
         certs.len(),
-        DGSP::check_cert(id, &cid, &wots_pks, &certs, &pkm)
+        DGSP::check_cert(id, &wots_pks, &certs, &pkm)
     );
 
     // After receiving certificates, user can sign an arbitrary message.
     let cert = certs.pop().unwrap();
-    let wots_rand = wots_rands.pop().unwrap();
+    let wots_seed = wots_seeds.pop().unwrap();
     let msg1 = "Hi! I am DGSP User 1. This is my first message!".as_bytes();
-    let sig1 = DGSP::sign(msg1, &seed_u, id, &cid, wots_rand, cert);
+    let sig1 = DGSP::sign(msg1, &seed_u, id, wots_seed, cert);
 
     // Now having the public information, one can verify the user's signature:
     println!(
@@ -241,9 +241,9 @@ fn simple_dgsp_in_disk() {
 
     // Now user creates another signature:
     let cert = certs.pop().unwrap();
-    let wots_rand = wots_rands.pop().unwrap();
+    let wots_seed = wots_seeds.pop().unwrap();
     let msg2 = "I am still DGSP User 1 and this is my second message. :)".as_bytes();
-    let sig2 = DGSP::sign(msg2, &seed_u, id, &cid, wots_rand, cert);
+    let sig2 = DGSP::sign(msg2, &seed_u, id, wots_seed, cert);
     println!(
         "Verification status of the second signature of {:?}: {:?}.",
         username,
@@ -259,8 +259,8 @@ fn simple_dgsp_in_disk() {
     // Oh, no! No certificates remained for the user.
 
     // User then asks for a few more certificates from the DGSP manager.
-    let (wots_pks, mut wots_rands) = DGSP::csr(&seed_u, 5);
-    let mut certs = DGSP::gen_cert(&skm, id, &cid, &wots_pks, &plm).unwrap();
+    let (wots_pks, mut wots_seeds) = DGSP::csr(&seed_u, 5);
+    let mut certs = DGSP::gen_cert(&skm, id, &cid_star, &wots_pks, &plm).unwrap();
     println!(
         "Created {} new certificates for {:?}, requested by the user.",
         certs.len(),
@@ -269,9 +269,9 @@ fn simple_dgsp_in_disk() {
 
     // Now user can continue signing messages.
     let cert = certs.pop().unwrap();
-    let wots_rand = wots_rands.pop().unwrap();
+    let wots_seed = wots_seeds.pop().unwrap();
     let msg3 = "I am yet again DGSP User 1 and this is my third message. ciao!".as_bytes();
-    let sig3 = DGSP::sign(msg3, &seed_u, id, &cid, wots_rand, cert);
+    let sig3 = DGSP::sign(msg3, &seed_u, id, wots_seed, cert);
     println!(
         "Verification status of the third signature of {:?}: {:?}.",
         username,
@@ -318,9 +318,9 @@ fn simple_dgsp_in_disk() {
 
     // And user can no longer create valid signatures using the remaining certificates:
     let cert = certs.pop().unwrap();
-    let wots_rand = wots_rands.pop().unwrap();
+    let wots_seed = wots_seeds.pop().unwrap();
     let msg4 = "This is DGSP User 1 and I am trying to sign even after being revoked!".as_bytes();
-    let sig4 = DGSP::sign(msg4, &seed_u, id, &cid, wots_rand, cert);
+    let sig4 = DGSP::sign(msg4, &seed_u, id, wots_seed, cert);
     println!(
         "Verification status of the new signature signed by {:?} after revocation: {:?}.",
         username,

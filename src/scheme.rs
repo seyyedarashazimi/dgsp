@@ -120,7 +120,7 @@
 //!     .expect("Certificate generation failed");
 //!
 //! // User checks the certificate validity
-//! DGSP::check_cert(user_id, &cid, &wots_pks, &certs, &pkm)
+//! DGSP::check_cert(user_id, &wots_pks, &certs, &pkm)
 //!     .expect("Certificate check failed");
 //!
 //! // User signs a message using the certificate and corresponding randomness
@@ -129,7 +129,6 @@
 //!     message,
 //!     &seed_user,
 //!     user_id,
-//!     &cid,
 //!     wots_rands.into_iter().next().unwrap(),
 //!     certs.into_iter().next().unwrap(),
 //! );
@@ -202,6 +201,15 @@ impl DGSPWotsRand {
         OsRng.fill_bytes(&mut wots_sgn_seed);
         Self(wots_sgn_seed)
     }
+    /// Creates a new instance of `DGSPWotsRand` with random seeds
+    /// derived from another secret seed given as input
+    pub fn from_seed(seed: &[u8; DGSP_N]) -> Self {
+        let mut input = [0u8; DGSP_N];
+        input[..DGSP_N].copy_from_slice(seed);
+        let mut wots_sgn_seed = [0u8; DGSP_N];
+        DGSPHasher::hash_simple(&mut wots_sgn_seed, &input);
+        Self(wots_sgn_seed)
+    }
 }
 
 // Create a new type `DGSPSecret` as a wrapper around a fixed-size array.
@@ -238,8 +246,9 @@ pub struct DGSPManagerPublicKey {
 }
 
 /// A DGSP certificate produced by the manager. It contains an encrypted user
-/// binding value (`zeta`) and a SPHINCS+ signature (`spx_sig`) that
-/// authenticates the certificate for a given WOTS+ public key.
+/// binding value (`zeta`), the proof used for opening (`pi`), and a SPHINCS+
+/// signature (`spx_sig`) that authenticates the certificate for a given WOTS+
+/// public key.
 ///
 /// **Notes on the SPHINCS+ signature `spx_sig`:**
 /// - The size of the SPHINCS+ signature depends on the selected parameter set
@@ -260,13 +269,15 @@ pub struct DGSPManagerPublicKey {
 pub struct DGSPCert {
     /// The encrypted value (zeta) used to bind the user identity.
     pub zeta: [u8; DGSP_ZETA_BYTES],
+    /// The proof (pi) used to prove opening
+    pub pi: [u8; DGSP_N],
     /// The SPHINCS+ signature that authenticates the certificate for a given
     /// WOTS+ public key.
     pub spx_sig: SphincsPlusSignature,
 }
 
-/// A DGSP signature that contains a WOTS+ signature, the corresponding
-/// certificate, the randomness for WOTS+, and a binding value.
+/// A DGSP signature that contains a WOTS+ signature and randomness, user Id
+/// encryption, SPHINCS+ signature, and a binding value.
 ///
 /// Although cloning is provided, be cautious when cloning this structure as
 /// duplicating large certificates can incur significant performance and memory
@@ -279,8 +290,10 @@ pub struct DGSPSignature {
     pub wots_sig: [u8; SPX_WOTS_BYTES],
     /// The randomness used by WOTS+ as the sign seed.
     pub wots_rand: DGSPWotsRand,
-    /// The one-time certificate created for the WOTS+ public key.
-    pub cert: DGSPCert,
+    /// The encryption of the users ID
+    pub zeta: [u8; DGSP_ZETA_BYTES],
+    /// The SPHINCS+ signature to authenticate the user
+    pub spx_sig: SphincsPlusSignature,
     /// The binding value (tau) that is computed from the WOTS+ public key and
     /// the user id.
     pub tau: [u8; DGSP_N],
@@ -334,8 +347,8 @@ impl DGSP {
     ///
     /// # Returns
     ///
-    /// A `Result` containing a tuple `(user_id, cid)` on success. If the given
-    /// username exists in the plm, this returns an error,
+    /// A `Result` containing a tuple `(user_id, cid*)` on success.
+    /// If the given username exists in the plm, this returns an error.
     pub fn join<P: PLMInterface>(
         hash_secret: &DGSPSecret,
         username: &str,
@@ -343,7 +356,8 @@ impl DGSP {
     ) -> Result<(u64, [u8; DGSP_N])> {
         let id = plm.add_new_user(username)?;
         let cid = Self::calculate_cid(hash_secret, id);
-        Ok((id, cid))
+        let cid_star = Self::calculate_cid_star(id, cid);
+        Ok((id, cid_star))
     }
 
     /// Generates a batch of certificates for a user.
@@ -356,7 +370,7 @@ impl DGSP {
     ///
     /// - `manager_sk`: A reference to the manager secret key.
     /// - `id`: The user's identifier.
-    /// - `cid`: A reference to the user's credential identifier.
+    /// - `cid*`: A reference to the user's credential identifier.
     /// - `wotsplus_public_keys`: A slice of WOTS+ public keys (each of size
     ///   `DGSP_N`).
     /// - `plm`: A reference to an object implementing `PLMInterface`.
@@ -367,16 +381,17 @@ impl DGSP {
     pub fn gen_cert<P: PLMInterface>(
         manager_sk: &DGSPManagerSecretKey,
         id: u64,
-        cid: &[u8; DGSP_N],
+        cid_star: &[u8; DGSP_N],
         wotsplus_public_keys: &[[u8; DGSP_N]],
         plm: &P,
     ) -> Result<Vec<DGSPCert>> {
-        Self::req_validity(&manager_sk.msk.hash_secret, id, cid, plm)?;
+        Self::req_validity(&manager_sk.msk.hash_secret, id, cid_star, plm)?;
+        let cid = Self::calculate_cid(&manager_sk.msk.hash_secret, id);
 
         let certs = Self::par_calculate_certificates(
             manager_sk,
             id,
-            cid,
+            &cid,
             wotsplus_public_keys,
             plm.get_ctr_id(id)?,
         )?;
@@ -440,7 +455,7 @@ impl DGSP {
                 let spx_msg = Self::prepare_spx_msg(wots_pk, &zeta, &tau);
                 let spx_sig = SphincsPlus::sign(&spx_msg, &manager_sk.spx_sk)?;
 
-                let cert = DGSPCert { zeta, spx_sig };
+                let cert = DGSPCert { zeta, pi, spx_sig };
 
                 Ok(cert)
             })
@@ -508,7 +523,7 @@ impl DGSP {
         sig: &DGSPSignature,
         message: &[u8],
     ) -> Result<(u64, String, [u8; DGSP_N])> {
-        let mut zeta = sig.cert.zeta;
+        let mut zeta = sig.zeta;
         let block = GenericArray::from_mut_slice(&mut zeta);
 
         let cipher = DGSPCipher::cipher(&msk.aes_key);
@@ -587,7 +602,7 @@ impl DGSP {
         Self::hash_simple(&input)
     }
 
-    /// Calculates the user credential `cid` for a given user.
+    /// Calculates the user-specific secret `cid` for a given user.
     ///
     /// The `cid` is computed using the manager secret key material `msk` and
     /// the user ID `id` as H(msk || id).
@@ -603,6 +618,26 @@ impl DGSP {
     fn calculate_cid(hash_secret: &DGSPSecret, id: u64) -> [u8; DGSP_N] {
         let mut input = [0u8; DGSP_N + DGSP_USER_BYTES];
         input[..DGSP_N].copy_from_slice(hash_secret.as_ref());
+        input[DGSP_N..].copy_from_slice(u64_to_bytes(id).as_ref());
+        Self::hash_simple(&input)
+    }
+
+    /// Calculates the user credential `cid*` for a given user.
+    ///
+    /// The `cid*` is computed using the user-specific secret `cid` and
+    /// the user ID `id` as H(id || cid).
+    ///
+    /// # Parameters
+    ///
+    /// - `hash_secret`: Reference to the manager's hash secret.
+    /// - `id`: The user’s identifier.
+    ///
+    /// # Returns
+    ///
+    /// A `[u8; DGSP_N]` array representing the certificate identifier.
+    fn calculate_cid_star(id: u64, cid: [u8; DGSP_N]) -> [u8; DGSP_N] {
+        let mut input = [0u8; DGSP_N + DGSP_USER_BYTES];
+        input[..DGSP_N].copy_from_slice(cid.as_ref());
         input[DGSP_N..].copy_from_slice(u64_to_bytes(id).as_ref());
         Self::hash_simple(&input)
     }
@@ -645,7 +680,7 @@ impl DGSP {
     ///
     /// - `hash_secret`: Reference to the manager's hash secret.
     /// - `id`: The user’s identifier.
-    /// - `cid`: The provided user credential.
+    /// - `cid*`: The provided user credential.
     /// - `plm`: A reference to an object implementing `PLMInterface`.
     ///
     /// # Returns
@@ -654,7 +689,7 @@ impl DGSP {
     fn req_validity<P: PLMInterface>(
         hash_secret: &DGSPSecret,
         id: u64,
-        cid: &[u8; DGSP_N],
+        cid_star: &[u8; DGSP_N],
         plm: &P,
     ) -> Result<()> {
         // check if user exists and is active
@@ -663,7 +698,7 @@ impl DGSP {
         }
 
         // check if user cid is correct
-        if *cid != Self::calculate_cid(hash_secret, id) {
+        if *cid_star != Self::calculate_cid_star(id, Self::calculate_cid(hash_secret, id)) {
             return Err(Error::InvalidCertReq);
         }
         Ok(())
@@ -726,6 +761,26 @@ impl DGSP {
         seed_user
     }
 
+    /// Generates the "salted" key to be input directly to WOTS
+    ///
+    /// This means each WOTS secret key is randomized in a
+    /// forgettable way
+    ///
+    /// # Parameters
+    ///
+    /// - `seed_user`: The (long-term) user seed
+    /// - `wots_seed`: A single-use secret WOTS seed
+    ///
+    /// # Returns
+    ///
+    /// A byte array to be used as the secret key seed in WOTS
+    pub fn wots_key(seed_user: &[u8; DGSP_N], wots_seed: &[u8; DGSP_N]) -> [u8; DGSP_N] {
+        let mut input: [u8; DGSP_N + DGSP_N] = [0; DGSP_N + DGSP_N];
+        input[..DGSP_N].copy_from_slice(seed_user);
+        input[DGSP_N..].copy_from_slice(wots_seed);
+        Self::hash_simple(&input)
+    }
+
     /// Creates a batch of certificate signing requests (CSRs).
     ///
     /// For a given user seed and a specified batch size, this function
@@ -739,16 +794,18 @@ impl DGSP {
     ///
     /// # Returns
     ///
-    /// A tuple `(Vec<[u8; DGSP_N]>, Vec<DGSPWotsRand>)` containing the public
-    /// keys and randomness objects.
-    pub fn csr(seed_user: &[u8; DGSP_N], b: usize) -> (Vec<[u8; DGSP_N]>, Vec<DGSPWotsRand>) {
+    /// A tuple `(Vec<[u8; DGSP_N]>, Vec<DGSP_N>)`
+    /// containing the public keys and randomness seeds.
+    pub fn csr(seed_user: &[u8; DGSP_N], b: usize) -> (Vec<[u8; DGSP_N]>, Vec<[u8; DGSP_N]>) {
         (0..b)
             .into_par_iter()
             .map(|_| {
-                let wots_rand = DGSPWotsRand::new();
+                let mut wots_seed: [u8; DGSP_N] = [0; DGSP_N];
+                OsRng.fill_bytes(&mut wots_seed);
+                let wots_rand = DGSPWotsRand::from_seed(&wots_seed);
                 let wp = WotsPlus::new(wots_rand.as_ref());
-                let (pk_wots, _) = wp.keygen(seed_user);
-                (pk_wots, wots_rand)
+                let (pk_wots, _) = wp.keygen(&DGSP::wots_key(seed_user, &wots_seed));
+                (pk_wots, wots_seed)
             })
             .unzip()
     }
@@ -771,8 +828,7 @@ impl DGSP {
     /// - `message`: The message to sign.
     /// - `seed_user`: A reference to the user seed.
     /// - `id`: The user’s identifier.
-    /// - `cid`: A reference tp the user’s credential.
-    /// - `wots_rand`: The given WOTS+ randomness used for signing, consumed by
+    /// - `wots_seed`: The given WOTS+ randomness seed used for signing, consumed by
     ///   this function.
     /// - `cert`: The given certificate issued by the manager, consumed by this
     ///   function.
@@ -784,20 +840,24 @@ impl DGSP {
         message: &[u8],
         seed_user: &[u8; DGSP_N],
         id: u64,
-        cid: &[u8],
-        wots_rand: DGSPWotsRand,
+        wots_seed: [u8; DGSP_N],
         cert: DGSPCert,
     ) -> DGSPSignature {
+        let wots_rand = DGSPWotsRand::from_seed(&wots_seed);
         let wp = WotsPlus::new(wots_rand.as_ref());
-        let (wots_pk, wots_sig) = wp.pk_sign_from_sk_seed(message, seed_user);
+        let (wots_pk, wots_sig) =
+            wp.pk_sign_from_sk_seed(message, &DGSP::wots_key(seed_user, &wots_seed));
 
-        let pi = Self::calculate_pi(&wots_pk, cid);
+        let pi = cert.pi;
         let tau = Self::calculate_tau(&wots_pk, &pi, id);
+        let zeta = cert.zeta;
+        let spx_sig = cert.spx_sig;
 
         DGSPSignature {
             wots_sig,
             wots_rand,
-            cert,
+            zeta,
+            spx_sig,
             tau,
         }
     }
@@ -828,13 +888,13 @@ impl DGSP {
         revoked_list: &R,
         pk: &DGSPManagerPublicKey,
     ) -> Result<()> {
-        if revoked_list.contains(&sig.cert.zeta)? {
+        if revoked_list.contains(&sig.zeta)? {
             return Err(VerificationError::RevokedSignature)?;
         }
         let wp = WotsPlus::new(sig.wots_rand.as_ref());
         let wots_pk = wp.pk_from_sig(&sig.wots_sig, message);
-        let spx_msg = Self::prepare_spx_msg(&wots_pk, &sig.cert.zeta, &sig.tau);
-        SphincsPlus::verify(&sig.cert.spx_sig, &spx_msg, &pk.spx_pk)
+        let spx_msg = Self::prepare_spx_msg(&wots_pk, &sig.zeta, &sig.tau);
+        SphincsPlus::verify(&sig.spx_sig, &spx_msg, &pk.spx_pk)
     }
 
     /// Checks the validity of a set of certificates.
@@ -847,7 +907,6 @@ impl DGSP {
     /// # Parameters
     ///
     /// - `id`: The user’s identifier.
-    /// - `cid`: A reference to the user’s credential.
     /// - `wotsplus_public_keys`: A slice of WOTS+ public keys.
     /// - `certs`: A vector of certificates references.
     /// - `pk`: The manager's public key reference.
@@ -858,7 +917,6 @@ impl DGSP {
     /// `Err(dgsp::Error)` otherwise.
     pub fn check_cert(
         id: u64,
-        cid: &[u8; DGSP_N],
         wotsplus_public_keys: &[[u8; DGSP_N]],
         certs: &Vec<DGSPCert>,
         pk: &DGSPManagerPublicKey,
@@ -871,7 +929,7 @@ impl DGSP {
             .into_par_iter()
             .zip(certs.into_par_iter())
             .try_for_each(|(wots_pk, cert)| {
-                let pi = Self::calculate_pi(wots_pk, cid);
+                let pi = cert.pi;
                 let tau = Self::calculate_tau(wots_pk, &pi, id);
                 let spx_msg = Self::prepare_spx_msg(wots_pk, &cert.zeta, &tau);
                 SphincsPlus::verify(&cert.spx_sig, &spx_msg, &pk.spx_pk)
@@ -974,17 +1032,17 @@ mod tests {
         // Create a user and join to DGSP
         let seed = DGSP::keygen_user();
         let username = random_str(10);
-        let (id, cid) = DGSP::join(&skm.msk.hash_secret, username.as_str(), &plm).unwrap();
+        let (id, cid_star) = DGSP::join(&skm.msk.hash_secret, username.as_str(), &plm).unwrap();
 
         // Create a batch of CSR
         const B: usize = 3;
         let (mut wots_pks, mut wots_rands) = DGSP::csr(&seed, B);
 
         // Obtain certificates for the given csr batch
-        let mut certs = DGSP::gen_cert(&skm, id, &cid, &wots_pks, &plm).unwrap();
+        let mut certs = DGSP::gen_cert(&skm, id, &cid_star, &wots_pks, &plm).unwrap();
 
         // Make sure the given certificates are correctly created by the manager.
-        DGSP::check_cert(id, &cid, &wots_pks, &certs, &pkm).unwrap();
+        DGSP::check_cert(id, &wots_pks, &certs, &pkm).unwrap();
 
         // Sign a single message
         let message = random_message();
@@ -992,12 +1050,13 @@ mod tests {
         let wots_rand = wots_rands.pop().unwrap();
         let cert = certs.pop().unwrap();
         let wots_pk = wots_pks.pop().unwrap();
-        let sig = DGSP::sign(&message, &seed, id, &cid, wots_rand, cert);
+        let sig = DGSP::sign(&message, &seed, id, wots_rand, cert);
 
         // Verify the signature
         DGSP::verify(&message, &sig, &revoked_list, &pkm).unwrap();
 
         // Obtain id, username, and proof from sig
+        let cid = DGSP::calculate_cid(&skm.msk.hash_secret, id);
         let pi = DGSP::calculate_pi(&wots_pk, &cid);
         assert_eq!(
             DGSP::open(&skm.msk, &plm, &sig, &message).unwrap(),
@@ -1009,7 +1068,7 @@ mod tests {
 
         // Revoke a user and its certificates
         DGSP::revoke(&skm.msk.aes_key, &plm, &[id], &revoked_list).unwrap();
-        assert!(revoked_list.contains(&sig.cert.zeta).unwrap());
+        assert!(revoked_list.contains(&sig.zeta).unwrap());
 
         for cert in &certs {
             assert!(revoked_list.contains(&cert.zeta).unwrap());
@@ -1026,7 +1085,7 @@ mod tests {
         let wots_rand_new = wots_rands.pop().unwrap();
         let cert_new = certs.pop().unwrap();
         let message_new = random_message();
-        let sig_new = DGSP::sign(&message_new, &seed, id, &cid, wots_rand_new, cert_new);
+        let sig_new = DGSP::sign(&message_new, &seed, id, wots_rand_new, cert_new);
         assert_eq!(
             DGSP::verify(&message_new, &sig_new, &revoked_list, &pkm),
             Err(Error::VerificationFailed(
@@ -1054,27 +1113,28 @@ mod tests {
 
         let seed_u0 = DGSP::keygen_user();
         let username_u0 = "dgsp user 0";
-        let (id_u0, cid_u0) = DGSP::join(&skm.msk.hash_secret, username_u0, &plm).unwrap();
+        let (id_u0, cid_star_u0) = DGSP::join(&skm.msk.hash_secret, username_u0, &plm).unwrap();
 
         const B: usize = 1;
         let (mut wots_pks, mut wots_rands) = DGSP::csr(&seed_u0, B);
 
         // Test manager with fake credentials:
         let fake_id = 6u64;
-        let mut fake_cid = cid_u0;
+        let mut fake_cid = cid_star_u0;
         fake_cid[0] ^= 1;
-        assert!(DGSP::gen_cert(&skm, fake_id, &cid_u0, &wots_pks, &plm).is_err());
+        assert!(DGSP::gen_cert(&skm, fake_id, &cid_star_u0, &wots_pks, &plm).is_err());
         assert_eq!(
             DGSP::gen_cert(&skm, id_u0, &fake_cid, &wots_pks, &plm),
             Err(Error::InvalidCertReq)
         );
         assert!(DGSP::gen_cert(&skm, fake_id, &fake_cid, &wots_pks, &plm).is_err());
 
-        let mut certs = DGSP::gen_cert(&skm, id_u0, &cid_u0, &wots_pks, &plm).unwrap();
-        DGSP::check_cert(id_u0, &cid_u0, &wots_pks, &certs, &pkm).unwrap();
+        let mut certs = DGSP::gen_cert(&skm, id_u0, &cid_star_u0, &wots_pks, &plm).unwrap();
+        DGSP::check_cert(id_u0, &wots_pks, &certs, &pkm).unwrap();
 
         let wots_pk = wots_pks.pop().unwrap();
         let cert = certs.pop().unwrap();
+        let cid_u0 = DGSP::calculate_cid(&skm.msk.hash_secret, id_u0);
         let pi = DGSP::calculate_pi(&wots_pk, &cid_u0);
         let mut fake_tau = DGSP::calculate_tau(&wots_pk, &pi, id_u0);
         fake_tau[0] ^= 1;
@@ -1084,31 +1144,25 @@ mod tests {
         let spx_sig_fake = SphincsPlus::sign(&spx_msg_fake, &skm.spx_sk).unwrap();
         let fake_cert = DGSPCert {
             zeta: cert.zeta,
+            pi,
             spx_sig: spx_sig_fake,
         };
         assert!(matches!(
-            DGSP::check_cert(id_u0, &cid_u0, &[wots_pk], &vec!(fake_cert.clone()), &pkm),
+            DGSP::check_cert(id_u0, &[wots_pk], &vec!(fake_cert.clone()), &pkm),
             Err(Error::VerificationFailed(SphincsPlusVerificationFailed(_)))
         ));
 
         // Even signing without checking it should never be verified
         let message = random_message();
         let wots_rand = wots_rands.pop().unwrap();
-        let sig_fake = DGSP::sign(
-            &message,
-            &seed_u0,
-            id_u0,
-            &cid_u0,
-            wots_rand.clone(),
-            fake_cert,
-        );
+        let sig_fake = DGSP::sign(&message, &seed_u0, id_u0, wots_rand.clone(), fake_cert);
         assert!(matches!(
             DGSP::verify(&message, &sig_fake, &revoked_list, &pkm),
             Err(Error::VerificationFailed(SphincsPlusVerificationFailed(_)))
         ));
 
         // Now let's create a valid signature with the correct cert
-        let sig = DGSP::sign(&message, &seed_u0, id_u0, &cid_u0, wots_rand, cert);
+        let sig = DGSP::sign(&message, &seed_u0, id_u0, wots_rand, cert);
         DGSP::verify(&message, &sig, &revoked_list, &pkm).unwrap();
 
         // A new user joins the group
@@ -1119,6 +1173,7 @@ mod tests {
             DGSP::open(&skm.msk, &plm, &sig, &message).unwrap(),
             (id_u0, username_u0.to_string(), pi)
         );
+
         DGSP::judge(&sig, &message, id_u0, &pi).unwrap();
 
         // Assume manager returning a wrong id after opening the signature
@@ -1224,12 +1279,12 @@ mod tests {
         let (mut wots_pks, mut wots_rands) = DGSP::csr(&seed, B);
 
         let mut certs = DGSP::gen_cert(&skm, id, &cid, &wots_pks, &plm).unwrap();
-        DGSP::check_cert(id, &cid, &wots_pks, &certs, &pkm).unwrap();
+        DGSP::check_cert(id, &wots_pks, &certs, &pkm).unwrap();
 
         // Unequal lengths of WOTS+ pk list and certificate list
         let wots_pk = wots_pks.pop().unwrap();
         assert_eq!(
-            DGSP::check_cert(id, &cid, &wots_pks, &certs, &pkm),
+            DGSP::check_cert(id, &wots_pks, &certs, &pkm),
             Err(Error::SizeMismatch)
         );
 
@@ -1245,18 +1300,19 @@ mod tests {
 
         let fake_cert = DGSPCert {
             zeta: cert.zeta,
+            pi,
             spx_sig: spx_sig_fake,
         };
 
         assert!(matches!(
-            DGSP::check_cert(id, &cid, &[wots_pk], &vec!(fake_cert.clone()), &pkm),
+            DGSP::check_cert(id, &[wots_pk], &vec!(fake_cert.clone()), &pkm),
             Err(Error::VerificationFailed(SphincsPlusVerificationFailed(_)))
         ));
 
         // Even signing without checking it should never be verified
         let message = random_message();
         let wots_rand = wots_rands.pop().unwrap();
-        let sig_fake = DGSP::sign(&message, &seed, id, &cid, wots_rand, fake_cert);
+        let sig_fake = DGSP::sign(&message, &seed, id, wots_rand, fake_cert);
         assert!(matches!(
             DGSP::verify(&message, &sig_fake, &revoked_list, &pkm),
             Err(Error::VerificationFailed(SphincsPlusVerificationFailed(_)))
@@ -1290,7 +1346,7 @@ mod tests {
         let wr = wots_rands.pop().unwrap();
         let c = certs.pop().unwrap();
 
-        let sig_wrong_seed = DGSP::sign(&m, &seed_u0, id_u0, &cid_u0, wr, c);
+        let sig_wrong_seed = DGSP::sign(&m, &seed_u0, id_u0, wr, c);
         DGSP::verify(&m, &sig_wrong_seed, &revoked_list, &pkm).unwrap();
     }
     #[test]
@@ -1328,7 +1384,7 @@ mod tests {
         let c = certs.pop().unwrap();
 
         // Sign with incorrect seed:
-        let sig_wrong_seed = DGSP::sign(&m, &seed_u1, id_u0, &cid_u0, wr, c);
+        let sig_wrong_seed = DGSP::sign(&m, &seed_u1, id_u0, wr, c);
         assert!(matches!(
             DGSP::verify(&m, &sig_wrong_seed, &revoked_list, &pkm),
             Err(Error::VerificationFailed(SphincsPlusVerificationFailed(_)))
@@ -1369,7 +1425,7 @@ mod tests {
         let c = certs.pop().unwrap();
 
         // Sign with incorrect id:
-        let sig_wrong_id = DGSP::sign(&m, &seed_u0, id_u1, &cid_u0, wr, c);
+        let sig_wrong_id = DGSP::sign(&m, &seed_u0, id_u1, wr, c);
         assert!(matches!(
             DGSP::verify(&m, &sig_wrong_id, &revoked_list, &pkm),
             Err(Error::VerificationFailed(SphincsPlusVerificationFailed(_)))
@@ -1388,7 +1444,7 @@ mod tests {
         test_dgsp_sign_with_wrong_id(plm, revoked_list);
     }
 
-    fn test_dgsp_sign_with_wrong_cid<P: PLMInterface, R: RevokedListInterface>(
+    fn test_dgsp_sign_with_wrong_tau<P: PLMInterface, R: RevokedListInterface>(
         plm: P,
         revoked_list: R,
     ) {
@@ -1399,7 +1455,7 @@ mod tests {
         let (id_u0, cid_u0) = DGSP::join(&skm.msk.hash_secret, username_u0, &plm).unwrap();
 
         let username_u1 = "dgsp user 1";
-        let (_, cid_u1) = DGSP::join(&skm.msk.hash_secret, username_u1, &plm).unwrap();
+        let (_, _) = DGSP::join(&skm.msk.hash_secret, username_u1, &plm).unwrap();
 
         const B: usize = 1;
         let (wots_pks, mut wots_rands) = DGSP::csr(&seed_u0, B);
@@ -1407,26 +1463,27 @@ mod tests {
 
         let m = random_message();
         let wr = wots_rands.pop().unwrap();
-        let c = certs.pop().unwrap();
+        let mut c = certs.pop().unwrap();
+        c.zeta[0] ^= 1;
 
         // Sign with incorrect cid:
-        let sig_wrong_cid = DGSP::sign(&m, &seed_u0, id_u0, &cid_u1, wr, c);
+        let sig_wrong_tau = DGSP::sign(&m, &seed_u0, id_u0, wr, c);
         assert!(matches!(
-            DGSP::verify(&m, &sig_wrong_cid, &revoked_list, &pkm),
+            DGSP::verify(&m, &sig_wrong_tau, &revoked_list, &pkm),
             Err(Error::VerificationFailed(SphincsPlusVerificationFailed(_)))
         ));
     }
     #[test]
     #[cfg(feature = "in-disk")]
-    fn test_dgsp_sign_with_wrong_cid_in_disk() {
+    fn test_dgsp_sign_with_wrong_tau_in_disk() {
         let (plm, revoked_list) = in_disk().unwrap();
-        test_dgsp_sign_with_wrong_cid(plm, revoked_list);
+        test_dgsp_sign_with_wrong_tau(plm, revoked_list);
     }
     #[test]
     #[cfg(feature = "in-memory")]
-    fn test_dgsp_sign_with_wrong_cid_in_memory() {
+    fn test_dgsp_sign_with_wrong_tau_in_memory() {
         let (plm, revoked_list) = in_memory().unwrap();
-        test_dgsp_sign_with_wrong_cid(plm, revoked_list);
+        test_dgsp_sign_with_wrong_tau(plm, revoked_list);
     }
 
     fn test_dgsp_sign_with_wrong_wots_sgn_seed<P: PLMInterface, R: RevokedListInterface>(
@@ -1447,13 +1504,10 @@ mod tests {
         let wr = wots_rands.pop().unwrap();
         let c = certs.pop().unwrap();
 
-        // Sign with incorrect WOTS+ SGN seed :
-        let wrong_wr_seed = DGSPWotsRand({
-            let mut fake_wots_sgn_seed = wr.0;
-            fake_wots_sgn_seed[0] ^= 1;
-            fake_wots_sgn_seed
-        });
-        let sig_wrong_wr_seed = DGSP::sign(&m, &seed_u0, id_u0, &cid_u0, wrong_wr_seed, c);
+        let mut wrong_wr_seed = wr;
+        wrong_wr_seed[0] ^= 1;
+
+        let sig_wrong_wr_seed = DGSP::sign(&m, &seed_u0, id_u0, wrong_wr_seed, c);
         assert!(matches!(
             DGSP::verify(&m, &sig_wrong_wr_seed, &revoked_list, &pkm),
             Err(Error::VerificationFailed(SphincsPlusVerificationFailed(_)))
@@ -1499,7 +1553,7 @@ mod tests {
             },
             ..c
         };
-        let sig_wrong_cert_zeta = DGSP::sign(&m, &seed_u0, id_u0, &cid_u0, wr, wrong_c_zeta);
+        let sig_wrong_cert_zeta = DGSP::sign(&m, &seed_u0, id_u0, wr, wrong_c_zeta);
         assert!(matches!(
             DGSP::verify(&m, &sig_wrong_cert_zeta, &revoked_list, &pkm),
             Err(Error::VerificationFailed(SphincsPlusVerificationFailed(_)))
@@ -1546,7 +1600,7 @@ mod tests {
             },
             ..c
         };
-        let sig_wrong_cert_spx = DGSP::sign(&m, &seed_u0, id_u0, &cid_u0, wr, wrong_c_spx);
+        let sig_wrong_cert_spx = DGSP::sign(&m, &seed_u0, id_u0, wr, wrong_c_spx);
         assert!(matches!(
             DGSP::verify(&m, &sig_wrong_cert_spx, &revoked_list, &pkm),
             Err(Error::VerificationFailed(SphincsPlusVerificationFailed(_)))
@@ -1582,7 +1636,7 @@ mod tests {
         let m = random_message();
         let wr = wots_rands.pop().unwrap();
         let c = certs.pop().unwrap();
-        let sig = DGSP::sign(&m, &seed_u0, id_u0, &cid_u0, wr, c);
+        let sig = DGSP::sign(&m, &seed_u0, id_u0, wr, c);
 
         // Try to forge signature with fake message
         let mut fake_message = m.clone();
@@ -1622,7 +1676,7 @@ mod tests {
         let m = random_message();
         let wr = wots_rands.pop().unwrap();
         let c = certs.pop().unwrap();
-        let sig = DGSP::sign(&m, &seed_u0, id_u0, &cid_u0, wr, c);
+        let sig = DGSP::sign(&m, &seed_u0, id_u0, wr, c);
 
         // Try to forge signature with fake WOTS+ signature
         let sig_fake_wots_sig = DGSPSignature {
@@ -1668,17 +1722,14 @@ mod tests {
         let m = random_message();
         let wr = wots_rands.pop().unwrap();
         let c = certs.pop().unwrap();
-        let sig = DGSP::sign(&m, &seed_u0, id_u0, &cid_u0, wr, c);
+        let sig = DGSP::sign(&m, &seed_u0, id_u0, wr, c);
 
         // Try to forge signature with fake certificate zeta
         let sig_fake_zeta = DGSPSignature {
-            cert: DGSPCert {
-                zeta: {
-                    let mut fake_zeta = sig.cert.zeta;
-                    fake_zeta[0] ^= 1;
-                    fake_zeta
-                },
-                ..sig.cert
+            zeta: {
+                let mut fake_zeta = sig.zeta;
+                fake_zeta[0] ^= 1;
+                fake_zeta
             },
             ..sig
         };
@@ -1717,18 +1768,15 @@ mod tests {
         let m = random_message();
         let wr = wots_rands.pop().unwrap();
         let c = certs.pop().unwrap();
-        let sig = DGSP::sign(&m, &seed_u0, id_u0, &cid_u0, wr, c);
+        let sig = DGSP::sign(&m, &seed_u0, id_u0, wr, c);
 
         // Try to forge signature with fake SPHINCS+ signature
         let sig_fake_spx_sig = DGSPSignature {
-            cert: DGSPCert {
-                spx_sig: {
-                    let mut fake_spx_sig = [0u8; SPX_BYTES];
-                    fake_spx_sig.copy_from_slice(sig.cert.spx_sig.as_ref());
-                    fake_spx_sig[0] ^= 1;
-                    fake_spx_sig.into()
-                },
-                ..sig.cert
+            spx_sig: {
+                let mut fake_spx_sig = [0u8; SPX_BYTES];
+                fake_spx_sig.copy_from_slice(sig.spx_sig.as_ref());
+                fake_spx_sig[0] ^= 1;
+                fake_spx_sig.into()
             },
             ..sig
         };
@@ -1767,7 +1815,7 @@ mod tests {
         let m = random_message();
         let wr = wots_rands.pop().unwrap();
         let c = certs.pop().unwrap();
-        let sig = DGSP::sign(&m, &seed_u0, id_u0, &cid_u0, wr, c);
+        let sig = DGSP::sign(&m, &seed_u0, id_u0, wr, c);
 
         // Try to forge signature with fake WOTS+ SGN seed
         let sig_fake_wots_sgn_seed = DGSPSignature {
@@ -1813,7 +1861,7 @@ mod tests {
         let m = random_message();
         let wr = wots_rands.pop().unwrap();
         let c = certs.pop().unwrap();
-        let sig = DGSP::sign(&m, &seed_u0, id_u0, &cid_u0, wr, c);
+        let sig = DGSP::sign(&m, &seed_u0, id_u0, wr, c);
 
         // Try to forge signature with fake tau
         let sig_fake_tau = DGSPSignature {
@@ -1847,20 +1895,21 @@ mod tests {
 
         let seed_u0 = DGSP::keygen_user();
         let username_u0 = "dgsp user 0";
-        let (id_u0, cid_u0) = DGSP::join(&skm.msk.hash_secret, username_u0, &plm).unwrap();
+        let (id_u0, cid_star_u0) = DGSP::join(&skm.msk.hash_secret, username_u0, &plm).unwrap();
 
         const B: usize = 1;
         let (mut wots_pks, mut wots_rands) = DGSP::csr(&seed_u0, B);
 
-        let mut certs = DGSP::gen_cert(&skm, id_u0, &cid_u0, &wots_pks, &plm).unwrap();
+        let mut certs = DGSP::gen_cert(&skm, id_u0, &cid_star_u0, &wots_pks, &plm).unwrap();
 
         let wots_pk = wots_pks.pop().unwrap();
         let cert = certs.pop().unwrap();
+        let cid_u0 = DGSP::calculate_cid(&skm.msk.hash_secret, id_u0);
         let pi = DGSP::calculate_pi(&wots_pk, &cid_u0);
 
         let message = random_message();
         let wots_rand = wots_rands.pop().unwrap();
-        let sig = DGSP::sign(&message, &seed_u0, id_u0, &cid_u0, wots_rand, cert);
+        let sig = DGSP::sign(&message, &seed_u0, id_u0, wots_rand, cert);
 
         // A new user joins the group
         let username_u1 = "dgsp user 1";
