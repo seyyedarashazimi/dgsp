@@ -50,13 +50,6 @@ fn simple_dgsp_in_memory() {
         username
     );
 
-    // User can at any time check the given certificates to be sure they are correctly created.
-    println!(
-        "The status of checking {} certificates: {:?}.",
-        certs.len(),
-        DGSP::check_cert(id, &wots_pks, &certs, &pkm)
-    );
-
     // After receiving certificates, user can sign an arbitrary message.
     let cert = certs.pop().unwrap();
     let wots_seed = wots_seeds.pop().unwrap();
@@ -216,13 +209,6 @@ fn simple_dgsp_in_disk() {
         "Created {} new certificates for {:?}, requested by the user.",
         certs.len(),
         username
-    );
-
-    // User can at any time check the given certificates to be sure they are correctly created.
-    println!(
-        "The status of checking {} certificates: {:?}.",
-        certs.len(),
-        DGSP::check_cert(id, &wots_pks, &certs, &pkm)
     );
 
     // After receiving certificates, user can sign an arbitrary message.

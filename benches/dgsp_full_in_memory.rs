@@ -176,35 +176,6 @@ fn dgsp_full_benchmarks(c: &mut Criterion) {
     tweak_plm_rl(&plm, &revoked_list, &skm);
     let counter = AtomicU64::new(GROUP_SIZE + TWEAK_USERS_SIZE);
 
-    group.bench_function("check_cert", |b| {
-        pool.install(|| {
-            b.iter_custom(|num_iters| {
-                let username = counter.fetch_add(1, Ordering::Relaxed).to_string();
-                let (id, cid_star) = DGSP::join(&skm.msk.hash_secret, &username, &plm).unwrap();
-                let seed_u = DGSP::keygen_user();
-                let mut message = [0u8; 1];
-                let (wots_pks, _) = DGSP::csr(&seed_u, CERTIFICATE_ISSUED_SIZE);
-                let certs = DGSP::gen_cert(&skm, id, &cid_star, &wots_pks, &plm).unwrap();
-                OsRng.fill_bytes(&mut message);
-
-                let start = Instant::now();
-                for _ in 0..num_iters {
-                    let result =
-                        black_box(DGSP::check_cert(id, &wots_pks, black_box(&certs), &pkm));
-                    result.expect("Check certificates failed");
-                }
-                start.elapsed()
-            });
-        });
-    });
-
-    println!("Resetting database...");
-    reset_plm(&plm);
-    delete_revoked_list(revoked_list);
-    let revoked_list = initialize_revoked_list();
-    tweak_plm_rl(&plm, &revoked_list, &skm);
-    let counter = AtomicU64::new(GROUP_SIZE + TWEAK_USERS_SIZE);
-
     group.bench_function("sign", |b| {
         pool.install(|| {
             b.iter_custom(|num_iters| {

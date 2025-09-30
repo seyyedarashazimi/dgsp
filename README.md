@@ -12,7 +12,7 @@ DGSP supports:
 - Compact keypair and signature sizes.
 - Efficient signing and verification processes.
 - Proven security guarantees for correctness, unforgeability, anonymity, and traceability.
-- Manager behavior can be checked and judged.
+- Manager behavior can be judged.
 
 This implementation is optimized for performance and modularity, making it a powerful choice for cryptographic research
 and real-world applications requiring long-term security.
@@ -35,7 +35,7 @@ To obtain more info about DGSP group signature scheme, please refer to the paper
 - **Verification**: Signature verification for authenticity and validity.
 - **Opening**: Ability to trace signatures to specific users by the manager without compromising anonymity for other parties.
 - **Revocation**: Efficient revocation mechanism, including revoking a user, their corresponding signatures, and previously-generated certificates.
-- **Check Manager**: Evaluate manager behavior and make sure manager creates certificates and opens a given signature to an ID correctly.
+- **Judge Manager**: Evaluate manager behavior and make sure manager opens a given signature to an ID correctly.
 
 ### Cryptographic Primitives
 
@@ -103,7 +103,6 @@ All benchmark times are in milliseconds (ms).
 | Join           | 0.0030 | 0.0030 | 0.0029 | 0.0029 | 0.0259 | 0.0255 | 0.0278 | 0.0287 |
 | CSR            | 1.3630 | 10.985 | 1.3626 | 10.988 | 1.3982 | 11.045 | 1.4025 | 11.051 |
 | Gen Cert       | 61.451 | 491.53 | 61.552 | 491.55 | 61.910 | 495.04 | 61.596 | 492.15 |
-| Check Cert     | 2.0915 | 16.687 | 2.0871 | 16.709 | 2.0856 | 16.727 | 2.0977 | 16.755 |
 | Sign           | 1.3875 | 1.3870 | 1.3886 | 1.3869 | 1.4196 | 1.4202 | 1.4186 | 1.4192 |
 | Verify         | 2.7706 | 2.7678 | 2.7808 | 2.7725 | 2.7626 | 2.7670 | 2.7667 | 2.7778 |
 | Open           | 0.6798 | 0.6948 | 0.6987 | 0.7043 | 0.6957 | 0.6978 | 0.6831 | 0.6954 |
@@ -122,7 +121,6 @@ All benchmark times are in milliseconds (ms).
 | Join           | 0.0030 | 0.0030 | 0.0029 | 0.0029 | 0.0250 | 0.0263 | 0.0272 | 0.0280 |
 | CSR            | 1.3552 | 10.894 | 1.3556 | 10.905 | 1.4094 | 11.126 | 1.4117 | 11.137 |
 | Gen Cert       | 582.70 | 4661.6 | 583.53 | 4661.6 | 582.93 | 4664.1 | 583.52 | 4667.4 |
-| Check Cert     | 1.1405 | 9.0985 | 1.1417 | 9.0967 | 1.1521 | 9.1095 | 1.1493 | 9.1118 |
 | Sign           | 1.3847 | 1.3835 | 1.3863 | 1.3848 | 1.4418 | 1.4396 | 1.4874 | 1.4813 |
 | Verify         | 1.8255 | 1.8248 | 1.8207 | 1.8180 | 1.8515 | 1.8561 | 1.8571 | 1.8529 |
 | Open           | 0.6991 | 0.6881 | 0.6901 | 0.6911 | 0.7137 | 0.7060 | 0.7197 | 0.7237 |
@@ -233,11 +231,6 @@ let (wots_pks, mut wots_seeds) = DGSP::csr(&seed_u, batch_size);
 Manager generates the corresponding certificates:
 ```rust,ignore
 let mut certs = DGSP::gen_cert(&skm, id, &cid_star, &wots_pks, &plm).unwrap();
-```
-
-User can check if given certificates are correct or not:
-```rust,ignore
-DGSP::check_cert(id, &wots_pks, &certs, &pkm).unwrap();
 ```
 
 User signs a message:
