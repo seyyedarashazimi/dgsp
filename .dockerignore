@@ -1,0 +1,11 @@
+.git
+.github
+.idea
+.vscode
+target/
+examples/simple_db/
+benches/log_*/
+dgsp_sphincs_*
+database/
+test_db/
+temp_example_db_*
