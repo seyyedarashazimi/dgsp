@@ -2,6 +2,7 @@
 
 [![CI](https://github.com/seyyedarashazimi/dgsp/actions/workflows/rust.yml/badge.svg)](https://github.com/seyyedarashazimi/dgsp/actions/workflows/rust.yml)
 [![Docs](https://github.com/seyyedarashazimi/dgsp/actions/workflows/docs.yml/badge.svg)](https://seyyedarashazimi.github.io/dgsp/)
+[![crates.io](https://img.shields.io/crates/v/dgsp.svg)](https://crates.io/crates/dgsp)
 
 ## Overview
 
