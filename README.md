@@ -1,5 +1,8 @@
 # DGSP
 
+[![CI](https://github.com/seyyedarashazimi/dgsp/actions/workflows/rust.yml/badge.svg)](https://github.com/seyyedarashazimi/dgsp/actions/workflows/rust.yml)
+[![Docs](https://github.com/seyyedarashazimi/dgsp/actions/workflows/docs.yml/badge.svg)](https://seyyedarashazimi.github.io/dgsp/)
+
 ## Overview
 
 DGSP is an efficient scalable post-quantum fully-dynamic group signature scheme implemented purely in Rust. It leverages the
@@ -22,6 +25,20 @@ and real-world applications requiring long-term security.
 ## DGSP paper
 
 To obtain more info about DGSP group signature scheme, please refer to the paper at: https://eprint.iacr.org/2025/760
+
+---
+
+## API Documentation
+
+The full API documentation is hosted at: https://seyyedarashazimi.github.io/dgsp/
+
+It is automatically built from the source code.
+
+To build and open the documentation locally from source:
+
+```sh
+cargo doc --no-deps --open
+```
 
 ---
 
@@ -154,19 +171,73 @@ All sizes are in Bytes.
 
 ### Prerequisites
 
-DGSP is fully implemented in Rust.
-Install Rust (version>=1.63.0) via [rustup](https://rustup.rs/).
+DGSP is fully implemented in Rust. Install Rust via [rustup](https://rustup.rs/).
+
+- **Minimum Supported Rust Version (MSRV):** 1.63.0
+- **Rust version used for the benchmarks in this README:** 1.84.0 (stable)
+- **Platform used for benchmarks:** Ubuntu 24.04, Intel® Core™ i7-4702MQ @ 2.20 GHz, 16 GiB RAM
+
+### Dependencies
+
+The following table lists all direct dependencies and the versions used:
+
+| Dependency             | Version | Notes                                                      |
+|:-----------------------|:--------|:-----------------------------------------------------------|
+| `aes`                  | 0.8.4   | AES block cipher for traceability                          |
+| `pqcrypto-sphincsplus` | 0.7.0   | SPHINCS+ signature scheme                                  |
+| `pqcrypto-traits`      | 0.3.5   | Traits for pqcrypto crates                                 |
+| `rand`                 | 0.8.5   | Random number generation                                   |
+| `rayon`                | 1.10.0  | Data parallelism                                           |
+| `thiserror`            | 2.0.11  | Error type derivation                                      |
+| `zeroize`              | 1.8.1   | Secure memory wiping                                       |
+| `bincode`              | 1.3.3   | Binary serialization (optional, `in-disk`)                 |
+| `serde`                | 1.0     | Serialization framework (optional, `serialization`)        |
+| `serde_json`           | 1.0     | JSON serialization (optional, `in-disk`)                   |
+| `serde-big-array`      | 0.5.1   | Serde support for large arrays (optional, `serialization`) |
+| `sha2`                 | 0.10.8  | SHA-2 hash functions (optional, `sphincs_sha2_*`)          |
+| `sha3`                 | 0.10.8  | SHA-3/SHAKE hash functions (optional, `sphincs_shake_*`)   |
+| `sled`                 | 0.34.7  | Embedded database (optional, `in-disk`)                    |
+
+Dev dependencies: `criterion` 0.5 (benchmarking), `tempfile` 3.15 (tests), `tracing-test` 0.2.5 (tests).
+
+### Docker (alternative to a local Rust installation)
+
+A pre-built Docker image is available on Docker Hub and provides a fully self-contained environment with Rust 1.84.0 and all dependencies already compiled:
+
+```bash
+docker pull arashazimi/dgsp
+```
+
+Run the end-to-end example:
+```bash
+docker run --rm arashazimi/dgsp cargo run --example simple --release
+```
+
+Run the full test suite:
+```bash
+docker run --rm arashazimi/dgsp cargo test --release
+```
+
+Run a benchmark (e.g. in-memory, `sphincs_shake_256f`):
+```bash
+docker run --rm arashazimi/dgsp \
+    cargo bench --bench dgsp_full_in_memory \
+    --no-default-features --features "in-memory benchmarking sphincs_shake_256f"
+```
+
+Reproduce all paper benchmark configurations:
+```bash
+docker run --rm arashazimi/dgsp bash benches/all_benchmarks.sh
+```
+
+To build the image locally from source:
+```bash
+docker build -t arashazimi/dgsp .
+```
 
 ### Add DGSP to Your Project
 
 To use DGSP as a library, add it to your `Cargo.toml`:
-
-```toml
-[dependencies]
-dgsp = { path = "path/to/dgsp" }
-```
-
-Alternatively, if published to crates.io:
 
 ```toml
 [dependencies]
@@ -313,6 +384,34 @@ cargo bench --bench dgsp_full_in_disk --no-default-features --features "in-disk 
 cargo bench --bench dgsp_full_in_memory --no-default-features --features "in-memory benchmarking sphincs_shake_256s"
 ```
 
+### Reproducing the Paper's Benchmark Tables
+
+To reproduce the full set of timing benchmarks reported in the paper, use the provided script that iterates over all configurations
+(two selected SPHINCS+ variants × both storage backends × group sizes 2^10 and 2^25 × batch sizes 1 and 8):
+
+```bash
+cd benches
+bash all_benchmarks.sh
+```
+
+The script modifies the benchmark constants, runs Criterion for each configuration, and saves raw logs under
+`benches/log_<timestamp>/in_memory/` and `benches/log_<timestamp>/in_disk/`.
+
+> **Note:** The 2^25 configurations require significant RAM (in-memory) and disk space (in-disk). Remove `25` from `GROUP_SIZES_LOG` in `all_benchmarks.sh` if resources are limited.
+
+**Reading the output:** Each Criterion block looks like:
+
+```
+DGSP_in_memory_using_sphincs_shake_256f_with_1024_users_and_1_batch/keygen_manager
+                        time:   [3.0519 ms 3.0521 ms 3.0524 ms]
+```
+
+The three values are the lower confidence bound, **mean**, and upper confidence bound over 100 samples. 
+The paper reports the **mean** (middle value).
+To populate the paper's table, collect the mean for each operation (`keygen_manager`, `join`, `csr`, `gen_cert`, `sign`, `verify`, `open`, `judge`, `revoke`) from the corresponding log file and convert to milliseconds if needed (Criterion prints in `s`, `ms`, `µs`, or `ns` depending on magnitude).
+
+> **Note:** The benchmarks were obtained on a specific machine (Ubuntu 24.04, Intel® Core™ i7-4702MQ @ 2.20 GHz, single core, hyper-threading and turbo-boost disabled). Results on other hardware will differ in absolute values, but the relative ordering and scaling behavior should support the main claims of the paper.
+
 ---
 
 ## Feature Flags
@@ -341,6 +440,46 @@ The library supports several feature flags for customization:
 
 ---
 
+## Source Code Organization
+
+```
+src/
+├── lib.rs              # Crate root; re-exports the public API
+├── scheme.rs           # Core protocol: all DGSP algorithms (keygen_manager, keygen_user,
+│                       #   join, csr, gen_cert, sign, verify, open, judge, revoke) and all
+│                       #   key / signature / certificate type definitions
+├── params.rs           # Compile-time constants derived from the chosen SPHINCS+ variant
+│                       #   (security level λ, byte sizes for keys, signatures, etc.)
+├── db.rs               # PLMInterface and RevokedListInterface trait definitions
+├── db/
+│   ├── in_memory.rs    # In-memory PLM and RevokedList (feature: in-memory)
+│   └── in_disk.rs      # Persistent sled-backed PLM and RevokedList (feature: in-disk)
+├── cipher.rs           # AES wrapper used for user-ID encryption in traceability
+├── hash.rs             # Hash function dispatcher (SHA-2 or SHAKE, selected at compile time)
+├── hash/               # Per-parameter-set SHA-2 and SHAKE implementations
+├── sphincs_plus.rs     # SPHINCS+ wrapper: key generation, signing, verification
+├── sphincs_plus/       # Per-parameter-set SPHINCS+ constants and ADRS byte-offset tables
+├── wots_plus.rs        # WOTS+ (Winternitz One-Time Signature Plus) core implementation
+├── wots_plus/          # ADRS (address) type used by WOTS+ operations
+├── error.rs            # Error and Result types (Error, VerificationError)
+└── utils.rs            # Internal byte-conversion helpers (u32/u64 ↔ big-endian bytes)
+
+benches/
+├── dgsp_full_in_memory.rs   # Criterion benchmark suite for the in-memory backend
+├── dgsp_full_in_disk.rs     # Criterion benchmark suite for the in-disk backend
+├── bench_utils.rs           # Shared helpers (SPHINCS+ feature detection, duration formatting)
+└── all_benchmarks.sh        # Runs all benchmark configurations and collects log files
+
+examples/
+└── simple.rs           # End-to-end example covering all DGSP operations
+
+tests/
+└── all_features_full_test.sh  # Iterates over all SPHINCS+ × storage feature combinations
+                               #   and runs the full test suite for each
+```
+
+---
+
 ## Contributing
 
 Contributions are welcome! To contribute:
@@ -348,12 +487,6 @@ Contributions are welcome! To contribute:
 1. Fork the repository.
 2. Create a new branch for your feature or bug fix.
 3. Submit a pull request with a detailed description of your changes.
-
----
-
-## Minimum Supported Rust Version (MSRV)
-
-This crate requires **Rust 1.63** or higher.
 
 ---
 

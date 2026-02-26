@@ -1,0 +1,48 @@
+name: Deploy API Docs to GitHub Pages
+
+on:
+  push:
+    branches: [ "main" ]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# Only one deployment runs at a time; cancel in-progress ones.
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build-docs:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build API documentation
+        # Build docs for all features so every public item is documented.
+        # --no-deps keeps the output focused on the dgsp crate itself.
+        run: |
+          cargo doc --no-deps --no-default-features \
+            --features "in-disk in-memory serialization sphincs_shake_256f"
+          # Add a redirect from the root so the Pages URL goes straight to the crate docs.
+          echo '<meta http-equiv="refresh" content="0; url=dgsp/index.html">' \
+            > target/doc/index.html
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: target/doc
+
+  deploy-docs:
+    needs: build-docs
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
