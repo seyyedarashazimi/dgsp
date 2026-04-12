@@ -12,7 +12,7 @@ future-proof against quantum adversaries.
 
 DGSP supports:
 
-- A vast user base of up to 2<sup>64</sup> users.
+- A vast user base of up to 2<sup>60</sup> users.
 - Compact keypair and signature sizes.
 - Efficient signing and verification processes.
 - Proven security guarantees for correctness, unforgeability, anonymity, and traceability.
@@ -77,7 +77,7 @@ cargo doc --no-deps --open
 
 ### Scalability and Efficiency
 
-- Handles up to 2<sup>64</sup> users.
+- Handles up to 2<sup>60</sup> users.
 - Addition and revocation of new users are seamless and efficient.
 - Provides in-memory and in-disk storage backends.
 - Parallelized operations using rayon crate for improved performance.
@@ -228,7 +228,7 @@ docker run --rm arashazimi/dgsp \
 
 Reproduce all paper benchmark configurations:
 ```bash
-docker run --rm arashazimi/dgsp bash benches/all_benchmarks.sh
+docker run --rm arashazimi/dgsp bash -c "cd benches && bash all_benchmarks.sh"
 ```
 
 To build the image locally from source:
@@ -398,7 +398,7 @@ bash all_benchmarks.sh
 The script modifies the benchmark constants, runs Criterion for each configuration, and saves raw logs under
 `benches/log_<timestamp>/in_memory/` and `benches/log_<timestamp>/in_disk/`.
 
-> **Note:** The 2^25 configurations require significant RAM (in-memory) and disk space (in-disk). Remove `25` from `GROUP_SIZES_LOG` in `all_benchmarks.sh` if resources are limited.
+> **Note:** Each benchmark run first populates a database for the configured group size before measuring algorithm performance. For 2^25 users on our reference hardware, this one-time database setup — not algorithm performance — requires approximately 20 minutes and 8 GB per SPHINCS+ variant (in-disk), or ~1 minute (in-memory); subsequent runs reuse the cached database in ~20 seconds. Running on native Linux is recommended — Docker on macOS adds overhead due to its Linux VM layer. Remove `25` from `GROUP_SIZES_LOG` in `all_benchmarks.sh` to skip these configurations.
 
 **Reading the output:** Each Criterion block looks like:
 
@@ -412,6 +412,8 @@ The paper reports the **mean** (middle value).
 To populate the paper's table, collect the mean for each operation (`keygen_manager`, `join`, `csr`, `gen_cert`, `sign`, `verify`, `open`, `judge`, `revoke`) from the corresponding log file and convert to milliseconds if needed (Criterion prints in `s`, `ms`, `µs`, or `ns` depending on magnitude).
 
 > **Note:** The benchmarks were obtained on a specific machine (Ubuntu 24.04, Intel® Core™ i7-4702MQ @ 2.20 GHz, single core, hyper-threading and turbo-boost disabled). Results on other hardware will differ in absolute values, but the relative ordering and scaling behavior should support the main claims of the paper.
+
+Raw Criterion logs from our reference run are available [here](https://github.com/seyyedarashazimi/dgsp/releases/tag/v0.1.1).
 
 ---
 

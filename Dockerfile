@@ -30,7 +30,7 @@
 #       --features "in-memory benchmarking sphincs_shake_256f"
 #
 # --- Reproduce all paper benchmark configurations (Section 5, Tables 6 and 7) ---
-#   docker run --rm arashazimi/dgsp bash benches/all_benchmarks.sh
+#   docker run --rm arashazimi/dgsp bash -c "cd benches && bash all_benchmarks.sh"
 
 FROM rust:1.84.0-slim-bookworm
 

@@ -12,9 +12,11 @@ CERTIFICATE_ISSUED_SIZES=(1 8)
 update_constants() {
     local group_size_log=$1
     local cert_size=$2
+    local tmp
+    tmp=$(mktemp)
 
-    sed -i "s/const GROUP_SIZE: u64 =.*/const GROUP_SIZE: u64 = 1 << $group_size_log;/" "$BENCHMARK_FILE"
-    sed -i "s/const CERTIFICATE_ISSUED_SIZE: usize =.*/const CERTIFICATE_ISSUED_SIZE: usize = $cert_size;/" "$BENCHMARK_FILE"
+    sed "s/const GROUP_SIZE: u64 =.*/const GROUP_SIZE: u64 = 1 << $group_size_log;/" "$BENCHMARK_FILE" > "$tmp" && mv "$tmp" "$BENCHMARK_FILE"
+    sed "s/const CERTIFICATE_ISSUED_SIZE: usize =.*/const CERTIFICATE_ISSUED_SIZE: usize = $cert_size;/" "$BENCHMARK_FILE" > "$tmp" && mv "$tmp" "$BENCHMARK_FILE"
 }
 
 timestamp=$(date +%Y_%m_%d_%H_%M_%S)
