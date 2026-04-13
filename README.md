@@ -242,13 +242,13 @@ To use DGSP as a library, add it to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-dgsp = "0.1.0"
+dgsp = "0.1.1"
 ```
 
 To enable specific features during installation, use as an example:
 ```toml
 [dependencies]
-dgsp = { version = "0.1.0", default-features = false, features = ["in-disk", "sphincs_shake_256f"] }
+dgsp = { version = "0.1.1", default-features = false, features = ["in-disk", "sphincs_shake_256f"] }
 ```
 
 ---
