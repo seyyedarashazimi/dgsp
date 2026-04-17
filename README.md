@@ -226,9 +226,16 @@ docker run --rm arashazimi/dgsp \
     --no-default-features --features "in-memory benchmarking sphincs_shake_256f"
 ```
 
-Reproduce all paper benchmark configurations:
+Reproduce all paper benchmark configurations and retrieve logs to the host, starting from the project root directory:
 ```bash
-docker run --rm arashazimi/dgsp bash -c "cd benches && bash all_benchmarks.sh"
+docker run --name dgsp_bench arashazimi/dgsp bash -c "cd benches && bash all_benchmarks.sh"
+docker cp dgsp_bench:"$(docker exec dgsp_bench sh -c 'ls -d /dgsp/benches/log_*')" benches/
+docker rm -f dgsp_bench
+```
+
+Then parse the results on the host (Python 3, no extra dependencies):
+```bash
+python3 benches/parse_benchmarks.py
 ```
 
 To build the image locally from source:
@@ -242,13 +249,13 @@ To use DGSP as a library, add it to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-dgsp = "0.1.1"
+dgsp = "0.1.2"
 ```
 
 To enable specific features during installation, use as an example:
 ```toml
 [dependencies]
-dgsp = { version = "0.1.1", default-features = false, features = ["in-disk", "sphincs_shake_256f"] }
+dgsp = { version = "0.1.2", default-features = false, features = ["in-disk", "sphincs_shake_256f"] }
 ```
 
 ---
@@ -398,22 +405,30 @@ bash all_benchmarks.sh
 The script modifies the benchmark constants, runs Criterion for each configuration, and saves raw logs under
 `benches/log_<timestamp>/in_memory/` and `benches/log_<timestamp>/in_disk/`.
 
-> **Note:** Each benchmark run first populates a database for the configured group size before measuring algorithm performance. For 2^25 users on our reference hardware, this one-time database setup — not algorithm performance — requires approximately 20 minutes and 8 GB per SPHINCS+ variant (in-disk), or ~1 minute (in-memory); subsequent runs reuse the cached database in ~20 seconds. Running on native Linux is recommended — Docker on macOS adds overhead due to its Linux VM layer. Remove `25` from `GROUP_SIZES_LOG` in `all_benchmarks.sh` to skip these configurations.
+> **Note:** Each benchmark run first populates a database for the configured group size before measuring algorithm performance. For 2^25 users on our reference hardware, this one-time database setup — not algorithm performance — requires approximately 20 minutes and 8 GB per SPHINCS+ variant on our Samsung 860 EVO (SATA SSD) (in-disk), or ~1 minute (in-memory); subsequent runs reuse the cached database in ~20 seconds. Running on native Linux is recommended — Docker on macOS adds overhead due to its Linux VM layer. Remove `25` from `GROUP_SIZES_LOG` in `all_benchmarks.sh` to skip these configurations.
 
-**Reading the output:** Each Criterion block looks like:
+**Parsing the output:** After the script finishes, use `parse_benchmarks.py` (Python 3, no extra dependencies) to parse the log files and print the formatted timing tables:
+
+```bash
+python3 benches/parse_benchmarks.py
+```
+
+The script automatically picks the most recent `log_*` directory. You can also pass a path explicitly:
+
+```bash
+python3 benches/parse_benchmarks.py benches/log_<timestamp>
+```
+
+Each Criterion log block looks like:
 
 ```
 DGSP_in_memory_using_sphincs_shake_256f_with_1024_users_and_1_batch/keygen_manager
                         time:   [3.0519 ms 3.0521 ms 3.0524 ms]
 ```
 
-The three values are the lower confidence bound, **mean**, and upper confidence bound over 100 samples. 
-The paper reports the **mean** (middle value).
-To populate the paper's table, collect the mean for each operation (`keygen_manager`, `join`, `csr`, `gen_cert`, `sign`, `verify`, `open`, `judge`, `revoke`) from the corresponding log file and convert to milliseconds if needed (Criterion prints in `s`, `ms`, `µs`, or `ns` depending on magnitude).
+The three values are the lower confidence bound, **mean**, and upper confidence bound over 100 samples. The paper reports the **mean** (middle value). The parser extracts the mean and converts all values to milliseconds.
 
 > **Note:** The benchmarks were obtained on a specific machine (Ubuntu 24.04, Intel® Core™ i7-4702MQ @ 2.20 GHz, single core, hyper-threading and turbo-boost disabled). Results on other hardware will differ in absolute values, but the relative ordering and scaling behavior should support the main claims of the paper.
-
-Raw Criterion logs from our reference run are available [here](https://github.com/seyyedarashazimi/dgsp/releases/tag/v0.1.1).
 
 ---
 
@@ -471,7 +486,8 @@ benches/
 ├── dgsp_full_in_memory.rs   # Criterion benchmark suite for the in-memory backend
 ├── dgsp_full_in_disk.rs     # Criterion benchmark suite for the in-disk backend
 ├── bench_utils.rs           # Shared helpers (SPHINCS+ feature detection, duration formatting)
-└── all_benchmarks.sh        # Runs all benchmark configurations and collects log files
+├── all_benchmarks.sh        # Runs all benchmark configurations and collects log files
+└── parse_benchmarks.py      # Parses Criterion log files and prints timing tables (run on host)
 
 examples/
 └── simple.rs           # End-to-end example covering all DGSP operations

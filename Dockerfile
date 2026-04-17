@@ -29,8 +29,11 @@
 #       --no-default-features \
 #       --features "in-memory benchmarking sphincs_shake_256f"
 #
-# --- Reproduce all paper benchmark configurations (Section 5, Tables 6 and 7) ---
-#   docker run --rm arashazimi/dgsp bash -c "cd benches && bash all_benchmarks.sh"
+# --- Reproduce all paper benchmark configurations ---
+#   docker run --name dgsp_bench arashazimi/dgsp bash -c "cd benches && bash all_benchmarks.sh"
+#   docker cp dgsp_bench:"$(docker exec dgsp_bench sh -c 'ls -d /dgsp/benches/log_*')" benches/
+#   docker rm -f dgsp_bench
+#   python3 benches/parse_benchmarks.py
 
 FROM rust:1.84.0-slim-bookworm
 
